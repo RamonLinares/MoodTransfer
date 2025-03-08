@@ -36,7 +36,7 @@ MoodTransfer is a client-side web application that runs entirely in your browser
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/moodtransfer.git
+   git clone https://github.com/RamonLinares/moodtransfer.git
    ```
 
 2. Open the project folder:
