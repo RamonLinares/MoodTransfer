@@ -1,0 +1,499 @@
+/* MoodTransfer - Custom styles to enhance Bulma */
+
+/* Font declarations */
+@font-face {
+  font-family: 'Montserrat';
+  src: url('fonts/Montserrat-VariableFont_wght.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Montserrat';
+  src: url('fonts/Montserrat-Italic-VariableFont_wght.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Custom variables to enhance Bulma */
+:root {
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dark mode styles */
+.is-dark-mode {
+  --bulma-background: #0f172a;
+  --bulma-text: #f8fafc;
+  --bulma-text-light: #cbd5e1;
+  --bulma-border: #334155;
+  
+  background-color: var(--bulma-background);
+  color: var(--bulma-text);
+}
+
+/* Fix text colors in dark mode */
+.is-dark-mode .title,
+.is-dark-mode .subtitle,
+.is-dark-mode .label,
+.is-dark-mode h1,
+.is-dark-mode h2,
+.is-dark-mode h3,
+.is-dark-mode h4,
+.is-dark-mode h5,
+.is-dark-mode h6 {
+  color: var(--bulma-text);
+}
+
+/* Fix other text elements in dark mode */
+.is-dark-mode .is-size-7,
+.is-dark-mode p,
+.is-dark-mode .content {
+  color: var(--bulma-text-light);
+}
+
+.is-dark-mode .navbar.is-light {
+  background-color: #1e293b;
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .navbar.is-light .navbar-brand,
+.is-dark-mode .navbar.is-light .navbar-item,
+.is-dark-mode .navbar.is-light .navbar-item span {
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .card {
+  background-color: #1e293b;
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .card-header {
+  background-color: #334155;
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .card-header-title {
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .box {
+  background-color: #1e293b;
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .footer {
+  background-color: #1e293b;
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .modal-card-head,
+.is-dark-mode .modal-card-body,
+.is-dark-mode .modal-card-foot {
+  background-color: #1e293b;
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .modal-card-title {
+  color: var(--bulma-text);
+}
+
+/* Custom styles for image upload containers */
+.upload-container {
+  position: relative;
+  min-height: 200px;
+  border-radius: 0.25rem;
+  overflow: hidden;
+  transition: var(--transition);
+}
+
+.upload-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1;
+  transition: var(--transition);
+}
+
+.preview {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.upload-container.has-image .upload-label {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Result container styles */
+.result-container {
+  position: relative;
+  min-height: 200px;
+  border-radius: 0.25rem;
+  overflow: hidden;
+  transition: var(--transition);
+}
+
+.result-container.clickable {
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.result-container.clickable:hover {
+  box-shadow: 0 0 0 2px rgba(50, 115, 220, 0.3);
+}
+
+.empty-result {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+  text-align: center;
+  padding: 1rem;
+}
+
+.empty-result .icon {
+  margin-bottom: 0.5rem;
+}
+
+.empty-result p {
+  margin-top: 0.5rem;
+  font-size: 1rem;
+  line-height: 1.4;
+  max-width: 80%;
+}
+
+/* Custom slider styles */
+.slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: #e2e8f0;
+  outline: none;
+  transition: var(--transition);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3273dc;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3273dc;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+/* Navbar styling */
+.navbar-brand {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  width: 100%;
+  justify-content: space-between;
+  padding: 0 0.75rem;
+}
+
+/* Dark mode toggle button styling */
+#darkModeToggle {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  margin-left: auto;
+  height: auto;
+  width: auto;
+  border-radius: 50%;
+}
+
+#darkModeToggle .icon {
+  height: 24px;
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#darkModeToggle:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.is-dark-mode #darkModeToggle:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Fix navbar layout on tablet and mobile */
+@media (max-width: 1023px) {
+  /* Prevent navbar items from wrapping */
+  .navbar, .navbar-brand, .navbar-end, .navbar-menu {
+    display: flex !important;
+    align-items: center;
+  }
+  
+  .navbar-brand {
+    flex: 1;
+  }
+  
+  .navbar-end {
+    margin-left: auto !important;
+  }
+  
+  /* Ensure the dark mode toggle stays in place */
+  #darkModeToggle {
+    margin-left: auto;
+  }
+}
+
+/* Ensure dark mode toggle alignment is consistent at all screen sizes */
+@media (min-width: 1024px) {
+  #darkModeToggle {
+    margin-left: auto;
+    margin-right: 1rem;
+  }
+}
+
+/* Mobile styles */
+@media (max-width: 768px) {
+  .mobile-bottom-menu {
+    padding-bottom: env(safe-area-inset-bottom);
+    height: 60px;
+  }
+  
+  /* Add space at the bottom to account for the mobile menu */
+  body {
+    padding-bottom: 70px;
+  }
+  
+  /* Mobile-specific navbar adjustments */
+  .navbar {
+    padding: 0.5rem;
+  }
+  
+  /* Make mobile menu items more compact */
+  .mobile-bottom-menu .navbar-item {
+    flex-direction: column;
+    padding: 0.5rem 0.25rem;
+    min-width: 0;
+    flex: 1;
+    height: 100%;
+    justify-content: center;
+  }
+  
+  .mobile-bottom-menu .navbar-item .icon {
+    margin: 0 !important;
+    height: 1.5rem;
+  }
+  
+  .mobile-bottom-menu .navbar-item p {
+    margin-top: 0.25rem !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    width: 100%;
+    font-size: 0.65rem !important;
+    line-height: 1;
+  }
+  
+  .mobile-bottom-menu .navbar-brand {
+    height: 100%;
+  }
+}
+
+/* Modal animations */
+.modal {
+  transition: var(--transition);
+}
+
+.modal.is-active {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.modal-card {
+  transform: translateY(20px);
+  opacity: 0;
+  transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+}
+
+.modal.is-active .modal-card {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Toast notification */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #323232;
+  color: white;
+  padding: 12px 24px;
+  border-radius: 4px;
+  z-index: 1000;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  animation: toastIn 0.3s, toastOut 0.3s 2.7s;
+  animation-fill-mode: forwards;
+}
+
+@keyframes toastIn {
+  from {
+    transform: translate(-50%, 100%);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes toastOut {
+  from {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-50%, 100%);
+    opacity: 0;
+  }
+}
+
+/* Slider styling in dark mode */
+.is-dark-mode .slider-container .is-size-7 {
+  color: var(--bulma-text-light);
+}
+
+/* Mobile bottom menu in dark mode */
+.is-dark-mode .mobile-bottom-menu {
+  background-color: #1e293b;
+  border-top: 1px solid var(--bulma-border);
+}
+
+.is-dark-mode .mobile-bottom-menu .navbar-item {
+  color: var(--bulma-text);
+}
+
+.is-dark-mode .mobile-bottom-menu .navbar-item .icon,
+.is-dark-mode .mobile-bottom-menu .navbar-item p {
+  color: var(--bulma-text-light);
+}
+
+/* Override the general navbar styles for mobile menu items */
+.is-dark-mode .mobile-bottom-menu a.navbar-item:focus,
+.is-dark-mode .mobile-bottom-menu a.navbar-item:hover,
+.is-dark-mode .mobile-bottom-menu a.navbar-item:active,
+.is-dark-mode .mobile-bottom-menu a.navbar-item.is-active {
+  background-color: #2d3748 !important;
+}
+
+.is-dark-mode .mobile-bottom-menu .navbar-item:hover,
+.is-dark-mode .mobile-bottom-menu .navbar-item:focus,
+.is-dark-mode .mobile-bottom-menu .navbar-item:active,
+.is-dark-mode .mobile-bottom-menu .navbar-item.is-active {
+  background-color: #2d3748 !important;
+}
+
+.is-dark-mode .mobile-bottom-menu .navbar-item:hover .icon,
+.is-dark-mode .mobile-bottom-menu .navbar-item:focus .icon,
+.is-dark-mode .mobile-bottom-menu .navbar-item:active .icon,
+.is-dark-mode .mobile-bottom-menu .navbar-item.is-active .icon,
+.is-dark-mode .mobile-bottom-menu .navbar-item:hover p,
+.is-dark-mode .mobile-bottom-menu .navbar-item:focus p,
+.is-dark-mode .mobile-bottom-menu .navbar-item:active p,
+.is-dark-mode .mobile-bottom-menu .navbar-item.is-active p {
+  color: var(--bulma-text);
+}
+
+/* Disabled state for mobile menu items */
+.is-dark-mode .mobile-bottom-menu .navbar-item.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.is-dark-mode .mobile-bottom-menu .navbar-item.disabled:hover {
+  background-color: transparent;
+}
+
+/* Override Bulma defaults for navbar items in dark mode */
+.is-dark-mode .navbar-item,
+.is-dark-mode a.navbar-item:focus,
+.is-dark-mode a.navbar-item:hover,
+.is-dark-mode a.navbar-item.is-active,
+.is-dark-mode .navbar-link:focus,
+.is-dark-mode .navbar-link:hover,
+.is-dark-mode .navbar-link.is-active {
+  background-color: transparent;
+  color: var(--bulma-text);
+}
+
+/* Lightroom preset download button styling */
+#downloadLrButton, #mobileLrBtn {
+  background-color: #31A8FF;
+  color: white;
+  border-color: transparent;
+}
+
+#downloadLrButton:hover, #mobileLrBtn:hover {
+  background-color: #2589D8;
+}
+
+.is-dark-mode #downloadLrButton, .is-dark-mode #mobileLrBtn {
+  background-color: #2589D8;
+  color: white;
+}
+
+.is-dark-mode #downloadLrButton:hover, .is-dark-mode #mobileLrBtn:hover {
+  background-color: #31A8FF;
+} 

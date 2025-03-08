@@ -1,0 +1,10 @@
+/luts/
+/test_images/
+# Logs
+logs
+*.log
+# Mac files
+.DS_Store
+# Windows files
+Thumbs.db
+Desktop.ini

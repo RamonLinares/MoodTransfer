@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoodTransfer</title>
+    <!-- Bulma CSS Framework -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css">
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body class="has-navbar-fixed-top">
+    <nav class="navbar is-fixed-top is-light" role="navigation" aria-label="main navigation">
+        <div class="navbar-brand">
+            <div class="navbar-item">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2v8"></path>
+                    <path d="m4.93 10.93 1.41 1.41"></path>
+                    <path d="M2 18h2"></path>
+                    <path d="M20 18h2"></path>
+                    <path d="m19.07 10.93-1.41 1.41"></path>
+                    <path d="M22 22H2"></path>
+                    <path d="m8 22 4-10 4 10"></path>
+                </svg>
+                <span class="ml-2 has-text-weight-bold">MoodTransfer</span>
+            </div>
+            
+            <!-- Move the dark mode toggle into the navbar-brand for better mobile layout -->
+            <button id="darkModeToggle" class="ml-auto">
+                <span class="icon">
+                    <i class="fas fa-moon"></i>
+                </span>
+            </button>
+        </div>
+    </nav>
+
+    <div class="container is-fluid mt-5 pt-5">
+        <div class="columns is-multiline">
+            <div class="column is-12">
+                <header class="has-text-centered mb-5">
+                    <h1 class="title is-2">MoodTransfer</h1>
+                    <p class="subtitle is-5">Transform your images with professional color grading</p>
+                </header>
+            </div>
+            
+            <div class="column is-12">
+                <div class="columns is-multiline">
+                    <!-- Reference Image -->
+                    <div class="column is-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <p class="card-header-title">Reference Image</p>
+                            </div>
+                            <div class="card-content upload-container" id="referenceContainer">
+                                <input type="file" id="referenceInput" accept="image/*" class="is-hidden">
+                                <div class="upload-label has-text-centered py-5">
+                                    <span class="icon is-large">
+                                        <i class="fas fa-cloud-upload-alt fa-2x"></i>
+                                    </span>
+                                    <p class="mt-3">Click to upload</p>
+                                </div>
+                                <div class="preview" id="referencePreview"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Target Image -->
+                    <div class="column is-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <p class="card-header-title">Target Image</p>
+                            </div>
+                            <div class="card-content upload-container" id="targetContainer">
+                                <input type="file" id="targetInput" accept="image/*" class="is-hidden">
+                                <div class="upload-label has-text-centered py-5">
+                                    <span class="icon is-large">
+                                        <i class="fas fa-cloud-upload-alt fa-2x"></i>
+                                    </span>
+                                    <p class="mt-3">Click to upload</p>
+                                </div>
+                                <div class="preview" id="targetPreview"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Result -->
+                    <div class="column is-4">
+                        <div class="card">
+                            <div class="card-header">
+                                <p class="card-header-title">Result</p>
+                            </div>
+                            <div class="card-content result-container" id="resultContainer">
+                                <div class="empty-result" id="emptyResult">
+                                    <span class="icon is-large">
+                                        <i class="fas fa-image fa-2x"></i>
+                                    </span>
+                                    <p class="mt-3">Your result will appear here</p>
+                                </div>
+                                <div class="preview" id="resultPreview"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="column is-12">
+                <div class="box">
+                    <div class="field">
+                        <label class="label">Color Intensity</label>
+                    </div>
+                    <div class="slider-container mt-3" id="colorIntensitySliderContainer">
+                        <input type="range" min="0" max="100" value="50" class="slider is-fullwidth" id="colorIntensity">
+                        <div class="columns is-mobile mt-2">
+                            <div class="column is-6 has-text-left">
+                                <span class="is-size-7">Reduced Intensity</span>
+                            </div>
+                            <div class="column is-6 has-text-right">
+                                <span class="is-size-7">Full Effect</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="column is-12">
+                <div class="field is-grouped is-grouped-centered">
+                    <p class="control">
+                        <button id="generateButton" class="button is-primary is-medium" disabled>Generate</button>
+                    </p>
+                    <p class="control">
+                        <button id="downloadButton" class="button is-info is-medium" style="display: none;" title="Download a LUT file (.cube) that can be imported into photo/video editing software">Download LUT</button>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Mobile Bottom Menu -->
+    <div class="navbar is-fixed-bottom is-light is-hidden-tablet mobile-bottom-menu">
+        <div class="navbar-brand is-flex is-justify-content-space-around is-align-items-center" style="width: 100%;">
+            <a class="navbar-item has-text-centered" id="mobileReferenceBtn">
+                <span class="icon">
+                    <i class="fas fa-image"></i>
+                </span>
+                <p class="is-size-7">Reference</p>
+            </a>
+            <a class="navbar-item has-text-centered" id="mobileTargetBtn">
+                <span class="icon">
+                    <i class="fas fa-check-circle"></i>
+                </span>
+                <p class="is-size-7">Target</p>
+            </a>
+            <a class="navbar-item has-text-centered" id="mobileGenerateBtn">
+                <span class="icon">
+                    <i class="fas fa-magic"></i>
+                </span>
+                <p class="is-size-7">Generate</p>
+            </a>
+            <a class="navbar-item has-text-centered" id="mobileDownloadBtn" style="display: none;" title="Download a LUT file (.cube) that can be imported into photo/video editing software">
+                <span class="icon">
+                    <i class="fas fa-download"></i>
+                </span>
+                <p class="is-size-7">Download LUT</p>
+            </a>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="footer mt-6">
+        <div class="content has-text-centered">
+            <p>Made with <span class="has-text-danger">♥</span> for photographers and creators</p>
+        </div>
+    </footer>
+    
+    <script src="script.js"></script>
+</body>
+</html> 
