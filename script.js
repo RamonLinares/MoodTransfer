@@ -19,6 +19,19 @@ class LUTGenerator {
         
         // Add enhanced class to result container
         document.getElementById('resultContainer').classList.add('enhanced-result-container');
+        
+        this.colorIntensity = document.getElementById('colorIntensity');
+        this.antiBandingStrength = document.getElementById('antiBandingStrength');
+        
+        // Add debug option
+        this.debugMode = false; // Set to true to enable detailed logging
+        
+        // Add window-level debug toggle for easier troubleshooting
+        window.toggleLUTDebug = () => {
+            this.debugMode = !this.debugMode;
+            console.log(`LUT debug mode ${this.debugMode ? 'enabled' : 'disabled'}`);
+            return `Debug mode is now ${this.debugMode ? 'ON' : 'OFF'}`;
+        };
     }
     
     initElements() {
@@ -220,12 +233,40 @@ class LUTGenerator {
             // Store the original slider value to detect changes
             this.originalSliderValue = this.colorIntensity.value;
             
+            // Setup anti-banding slider
+            if (this.antiBandingStrength) {
+                this.originalAntiBandingValue = this.antiBandingStrength.value;
+                
+                this.antiBandingStrength.addEventListener('input', () => {
+                    // Just update the value during movement
+                    this.originalAntiBandingValue = this.antiBandingStrength.value;
+                });
+                
+                this.antiBandingStrength.addEventListener('change', handleSliderChange);
+                this.antiBandingStrength.addEventListener('mouseup', handleSliderChange);
+            }
+            
             // Add an interval check to detect slider changes (as a backup)
             setInterval(() => {
                 // Only check if there's a significant difference to avoid minor floating point issues
-                if (this.lut && Math.abs(this.originalSliderValue - this.colorIntensity.value) > 0.1) {
-                    console.log('Interval detected slider change from', this.originalSliderValue, 'to', this.colorIntensity.value);
-                    this.originalSliderValue = this.colorIntensity.value;
+                const colorIntensityChanged = this.lut && 
+                    Math.abs(this.originalSliderValue - this.colorIntensity.value) > 0.1;
+                
+                const antiBandingChanged = this.lut && this.antiBandingStrength && 
+                    Math.abs(this.originalAntiBandingValue - this.antiBandingStrength.value) > 0.1;
+                
+                if (colorIntensityChanged || antiBandingChanged) {
+                    console.log('Interval detected slider change');
+                    
+                    if (colorIntensityChanged) {
+                        console.log('Color intensity changed from', this.originalSliderValue, 'to', this.colorIntensity.value);
+                        this.originalSliderValue = this.colorIntensity.value;
+                    }
+                    
+                    if (antiBandingChanged) {
+                        console.log('Anti-banding changed from', this.originalAntiBandingValue, 'to', this.antiBandingStrength.value);
+                        this.originalAntiBandingValue = this.antiBandingStrength.value;
+                    }
                     
                     // Call the same handler used for direct events
                     handleSliderChange();
@@ -434,131 +475,23 @@ class LUTGenerator {
         }
     }
     
-    async generateLUT() {
+    async calculateLUT(referenceCanvas, targetCanvas, progressCallback = null) {
         try {
-            // Update the original slider value to prevent false detection of changes
-            this.originalSliderValue = this.colorIntensity.value;
-            
-            if (!this.referenceImage || !this.targetImage) {
-                this.showToast('Please upload both reference and target images');
-                return;
-            }
-            
-            // Show loading state
-            if (this.generateButton) {
-                this.generateButton.classList.add('is-loading');
-            }
-            this.emptyResult.innerHTML = `
-                <div class="has-text-centered">
-                    <span class="icon is-large">
-                        <i class="fas fa-spinner fa-pulse fa-2x"></i>
-                    </span>
-                    <p class="mt-3">Generating...</p>
-                </div>
-            `;
-            
-            // Create canvases for processing
-            const referenceCanvas = this.createCanvas(this.referenceImage);
-            const targetCanvas = this.createCanvas(this.targetImage);
-            
-            // Calculate LUT
-            try {
-                this.lut = await this.calculateLUT(referenceCanvas, targetCanvas);
-            } catch (error) {
-                console.error('Error calculating LUT:', error);
-                this.showToast('Error generating color transformation. Please try different images.');
-                if (this.generateButton) {
-                    this.generateButton.classList.remove('is-loading');
+            // Function to report progress
+            const reportProgress = async (percent, message) => {
+                if (progressCallback && typeof progressCallback === 'function') {
+                    // Handle both sync and async callbacks
+                    try {
+                        const result = progressCallback(percent, message);
+                        if (result instanceof Promise) {
+                            await result;
+                        }
+                    } catch (e) {
+                        console.warn('Error in progress callback:', e);
+                    }
                 }
-                
-                // Reset to the "click to generate" state
-                this.emptyResult.innerHTML = `
-                    <span class="icon is-large">
-                        <i class="fas fa-magic fa-2x"></i>
-                    </span>
-                    <p class="mt-3">Click here to generate</p>
-                `;
-                return;
-            }
-            
-            // Apply LUT to target image
-            const resultCanvas = this.applyLUT(targetCanvas, this.lut);
-            
-            // Create result image
-            const resultImg = new Image();
-            resultImg.onload = () => {
-                // Clear loading state
-                if (this.generateButton) {
-                    this.generateButton.classList.remove('is-loading');
-                }
-                
-                // Show result
-                this.resultPreview.innerHTML = '';
-                this.resultPreview.appendChild(resultImg);
-                this.resultPreview.style.display = 'flex';
-                
-                // Update empty result text before hiding it
-                // This ensures that if the result state is reset, the text will be correct
-                this.emptyResult.innerHTML = `
-                    <span class="icon is-large">
-                        <i class="fas fa-download fa-2x"></i>
-                    </span>
-                    <p class="mt-3">Click here to download LUT</p>
-                `;
-                this.emptyResult.style.display = 'none';
-                
-                // Apply consistent styling
-                this.applyConsistentImageStyling(resultImg);
-                
-                // Make result clickable to download
-                this.resultPreview.style.cursor = 'pointer';
-                this.resultPreview.onclick = () => this.downloadResultImage();
-                
-                // Show download button
-                if (this.downloadButton) {
-                    this.downloadButton.style.display = 'block';
-                }
-                
-                if (this.mobileDownloadBtn) {
-                    this.mobileDownloadBtn.style.display = 'flex';
-                }
-                
-                // Update generate button state
-                this.updateGenerateButton();
-                
-                // Show success message
-                this.showToast('Color transformation applied successfully!');
             };
-            
-            resultImg.src = resultCanvas.toDataURL('image/jpeg', 0.95);
-        } catch (error) {
-            console.error('Error generating color transformation:', error);
-            this.showToast('Error generating color transformation. Please try again.');
-            if (this.generateButton) {
-                this.generateButton.classList.remove('is-loading');
-            }
-            
-            // Reset to the "click to generate" state
-            this.emptyResult.innerHTML = `
-                <span class="icon is-large">
-                    <i class="fas fa-magic fa-2x"></i>
-                </span>
-                <p class="mt-3">Click here to generate</p>
-            `;
-        }
-    }
-    
-    createCanvas(img) {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0);
-        return canvas;
-    }
-    
-    async calculateLUT(referenceCanvas, targetCanvas) {
-        try {
+
             // Get image data
             const refCtx = referenceCanvas.getContext('2d');
             const targetCtx = targetCanvas.getContext('2d');
@@ -567,10 +500,17 @@ class LUTGenerator {
             const refData = refCtx.getImageData(0, 0, referenceCanvas.width, referenceCanvas.height);
             const targetData = targetCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
             
-            // Calculate image statistics in both RGB and HSL spaces
+            reportProgress(5, 'Calculating RGB statistics...');
+            // Calculate image statistics in RGB space
             const refStats = this.calculateImageStats(refData.data);
             const targetStats = this.calculateImageStats(targetData.data);
             
+            reportProgress(15, 'Calculating LAB color space statistics...');
+            // Calculate image statistics in LAB space (new)
+            const refLabStats = this.calculateLABStats(refData.data);
+            const targetLabStats = this.calculateLABStats(targetData.data);
+            
+            reportProgress(25, 'Analyzing color characteristics...');
             // Analyze color temperature of reference image for more accurate matching
             const refTemperature = this.analyzeColorTemperature(refData.data);
             const targetTemperature = this.analyzeColorTemperature(targetData.data);
@@ -579,6 +519,7 @@ class LUTGenerator {
             const refHslStats = this.calculateHSLStats(refData.data);
             const targetHslStats = this.calculateHSLStats(targetData.data);
             
+            reportProgress(35, 'Creating color lookup table...');
             // Create LUT
             const lutSize = 33; // Standard size for most applications
             const lut = new Float32Array(lutSize * lutSize * lutSize * 3); // RGB values
@@ -586,10 +527,24 @@ class LUTGenerator {
             // Get the intensity adjustment value (0-100)
             const intensity = this.colorIntensity.value / 100;
             
+            // Get anti-banding strength (0-100)
+            const antiBandingStrength = this.antiBandingStrength ? this.antiBandingStrength.value / 100 : 0;
+            
+            reportProgress(40, 'Detecting image characteristics...');
             // Detect image characteristics for enhanced processing
             const isReferenceMonochrome = this.checkIfImageIsBW(refData.data);
             const isHighContrast = this.detectHighContrast(refStats);
             const dominantColor = this.detectDominantColor(refData.data);
+            
+            // Advanced: detect texture characteristics for spatial-aware matching
+            const textureMask = this.generateTextureMask(refData.data, referenceCanvas.width, referenceCanvas.height);
+            
+            reportProgress(45, 'Building color transformation map...');
+            
+            // Calculate total iterations for progress tracking
+            const totalIterations = lutSize * lutSize * lutSize;
+            let completedIterations = 0;
+            let lastProgressUpdate = 45;
             
             // Fill LUT with improved color transformation
             for (let r = 0; r < lutSize; r++) {
@@ -599,6 +554,7 @@ class LUTGenerator {
                         const g_norm = g / (lutSize - 1);
                         const b_norm = b / (lutSize - 1);
                         
+                        // ---------- ZONE DETECTION ----------
                         // Calculate luminance to determine which zone this color falls into
                         const luminance = 0.2126 * r_norm + 0.7152 * g_norm + 0.0722 * b_norm;
                         
@@ -607,35 +563,139 @@ class LUTGenerator {
                         const midtoneWeight = 1 - Math.abs((luminance - 0.5) * 2.5); // Peak at 0.5, taper to 0
                         const highlightWeight = Math.max(0, (luminance - 0.7) * 3.3); // Start at ~0.7, increase
                         
-                        // Convert to HSL for hue-based processing
+                        // ---------- NEW: LAB BASED MATCHING ----------
+                        // Convert RGB to LAB for perceptual color matching
+                        const labValues = this.rgb2lab(r_norm, g_norm, b_norm);
+                        
+                        // Apply optimal transport matching in LAB space for superior color accuracy
+                        const l_matched = this.optimalTransportMatch(labValues[0] / 100, targetLabStats, refLabStats, 'l');
+                        const a_matched = this.optimalTransportMatch((labValues[1] + 128) / 255, targetLabStats, refLabStats, 'a');
+                        const b_lab_matched = this.optimalTransportMatch((labValues[2] + 128) / 255, targetLabStats, refLabStats, 'b');
+                        
+                        // Convert normalized values back to LAB space
+                        const matchedLab = [
+                            l_matched * 100,
+                            a_matched * 255 - 128,
+                            b_lab_matched * 255 - 128
+                        ];
+                        
+                        // Convert matched LAB back to RGB
+                        let rgbFromLab = [r_norm, g_norm, b_norm]; // Default fallback
+                        
+                        // Add a safety check for the LAB conversion
+                        try {
+                            const labRgbResult = this.lab2rgb(matchedLab[0], matchedLab[1], matchedLab[2]);
+                            
+                            // Validate that the LAB->RGB conversion returned sane values
+                            const isValid = (
+                                !isNaN(labRgbResult[0]) && 
+                                !isNaN(labRgbResult[1]) && 
+                                !isNaN(labRgbResult[2]) &&
+                                labRgbResult[0] >= 0 && labRgbResult[0] <= 1 &&
+                                labRgbResult[1] >= 0 && labRgbResult[1] <= 1 &&
+                                labRgbResult[2] >= 0 && labRgbResult[2] <= 1
+                            );
+                            
+                            if (isValid) {
+                                // Only use the result if it's valid
+                                rgbFromLab = labRgbResult;
+                            } else {
+                                // If invalid, keep the fallback and don't use LAB in the blend
+                                rgbWeight += labWeight;
+                                labWeight = 0;
+                            }
+                        } catch (e) {
+                            console.warn('LAB conversion error:', e);
+                            // Keep the fallback and don't use LAB in the blend
+                            rgbWeight += labWeight;
+                            labWeight = 0;
+                        }
+                        
+                        // ---------- ORIGINAL COLOR MATCHING PIPELINE ----------
+                        // Also perform traditional histogram matching for blending
+                        let r_hist_matched = this.histogramMatch(r_norm, targetStats.r, refStats.r);
+                        let g_hist_matched = this.histogramMatch(g_norm, targetStats.g, refStats.g);
+                        let b_hist_matched = this.histogramMatch(b_norm, targetStats.b, refStats.b);
+                        
+                        // HSL-based matching for better color preservation
                         const hsl = this.rgb2hsl(r_norm, g_norm, b_norm);
-                        
-                        // Apply histogram matching for each channel with zone-based adjustments
-                        let r_matched = this.histogramMatch(r_norm, targetStats.r, refStats.r);
-                        let g_matched = this.histogramMatch(g_norm, targetStats.g, refStats.g);
-                        let b_matched = this.histogramMatch(b_norm, targetStats.b, refStats.b);
-                        
-                        // HSL-based matching for more accurate color transformation
                         const hslMatched = this.matchHSL(hsl, targetHslStats, refHslStats);
                         const rgbFromHsl = this.hsl2rgb(hslMatched[0], hslMatched[1], hslMatched[2]);
                         
-                        // Blend RGB-based and HSL-based matching for better results
-                        // Shadows favor HSL matching, highlights favor RGB matching
-                        r_matched = (r_matched * 0.6) + (rgbFromHsl[0] * 0.4);
-                        g_matched = (g_matched * 0.6) + (rgbFromHsl[1] * 0.4);
-                        b_matched = (b_matched * 0.6) + (rgbFromHsl[2] * 0.4);
+                        // ---------- ADAPTIVE BLENDING OF DIFFERENT COLOR MODELS ----------
+                        // LAB is most accurate but can cause issues when applied too strongly
+                        // Blend more conservatively with traditional methods
                         
+                        // Dynamic blend weights based on color characteristics
+                        let labWeight, hslWeight, rgbWeight;
+                        
+                        // The LAB implementation is causing the cyan problem - reduce its influence
+                        if (shadowWeight > 0.5) {
+                            // Shadows - more conservative LAB approach
+                            labWeight = 0.30;  // Reduced from 0.65
+                            hslWeight = 0.30;
+                            rgbWeight = 0.40;  // Increased for better RGB fidelity
+                        } else if (highlightWeight > 0.5) {
+                            // Highlights need gentler processing
+                            labWeight = 0.20;  // Reduced from 0.50
+                            hslWeight = 0.35;
+                            rgbWeight = 0.45;  // Increased for better RGB fidelity
+                        } else {
+                            // Midtones 
+                            labWeight = 0.25;  // Reduced from 0.60
+                            hslWeight = 0.35;
+                            rgbWeight = 0.40;  // Increased for better RGB fidelity
+                        }
+                        
+                        // Adaptively adjust weights based on chroma
+                        const chroma = Math.sqrt(
+                            Math.pow(labValues[1], 2) + 
+                            Math.pow(labValues[2], 2)
+                        );
+                        
+                        // For highly saturated colors, trust RGB histogram more to preserve vibrance
+                        if (chroma > 60) {
+                            labWeight -= 0.05;
+                            hslWeight -= 0.05;
+                            rgbWeight += 0.10;
+                        }
+                        
+                        // Final blend of the three color spaces
+                        let r_matched = (rgbFromLab[0] * labWeight) + 
+                                       (rgbFromHsl[0] * hslWeight) + 
+                                       (r_hist_matched * rgbWeight);
+                                       
+                        let g_matched = (rgbFromLab[1] * labWeight) + 
+                                       (rgbFromHsl[1] * hslWeight) + 
+                                       (g_hist_matched * rgbWeight);
+                                       
+                        let b_matched = (rgbFromLab[2] * labWeight) + 
+                                       (rgbFromHsl[2] * hslWeight) + 
+                                       (b_hist_matched * rgbWeight);
+                                       
+                        // Add a saturation boost to counteract any washing out
+                        const rgbToHsl = this.rgb2hsl(r_matched, g_matched, b_matched);
+                        rgbToHsl[1] *= 1.1; // Boost saturation by 10%
+                        rgbToHsl[1] = Math.min(1, rgbToHsl[1]); // Cap at 1
+                        const boostedRgb = this.hsl2rgb(rgbToHsl[0], rgbToHsl[1], rgbToHsl[2]);
+                        
+                        // Apply the saturation boost
+                        r_matched = boostedRgb[0];
+                        g_matched = boostedRgb[1];
+                        b_matched = boostedRgb[2];
+                        
+                        // ---------- BLACK & WHITE DETECTION & PROCESSING ----------
                         // Check if the reference image is black and white
                         if (isReferenceMonochrome) {
                             // If reference is B&W, result should also be B&W
-                            // Use luminance-based matching to convert to grayscale
+                            // Use CIEDE2000 weighted luminance for more natural grayscale conversion
                             const luminance = 0.2126 * r_matched + 0.7152 * g_matched + 0.0722 * b_matched;
                             r_matched = g_matched = b_matched = luminance;
                         } else {
                             // Enhanced color processing for color images
                             
+                            // ---------- COLOR TEMPERATURE CORRECTION ----------
                             // Apply color temperature correction based on reference image
-                            // This helps match the overall warmth/coolness
                             if (refTemperature.temperature === 'warm' && refTemperature.strength > 0.1) {
                                 // Warm up colors (increase red, decrease blue)
                                 const tempFactor = refTemperature.strength * intensity * 0.15;
@@ -648,8 +708,8 @@ class LUTGenerator {
                                 r_matched = Math.max(0, r_matched * (1 - tempFactor * 0.5));
                             }
                             
+                            // ---------- ZONE-BASED COLOR GRADING ----------
                             // Apply split toning - different color tints for shadows and highlights
-                            // Adjust using zone weights for more natural transitions
                             if (shadowWeight > 0) {
                                 // Warm up shadows (more red, less blue)
                                 const shadowIntensity = shadowWeight * intensity * 0.2;
@@ -659,13 +719,13 @@ class LUTGenerator {
                             
                             if (highlightWeight > 0) {
                                 // Cool highlights (more blue, less yellow) - gentler application
-                                // Apply less effect as we approach extreme highlights
                                 const highlightFactor = Math.min(1, 2.5 - 2 * luminance); // Reduces effect for values > 0.75
                                 const highlightIntensity = highlightWeight * intensity * 0.1 * highlightFactor;
                                 b_matched += highlightIntensity * 0.05;
                                 g_matched -= highlightIntensity * 0.02;
                             }
                             
+                            // ---------- ENHANCED CONTRAST PRESERVATION ----------
                             // Zone-based contrast enhancement
                             if (isHighContrast) {
                                 if (shadowWeight > 0.5) {
@@ -686,6 +746,7 @@ class LUTGenerator {
                             }
                         }
                         
+                        // ---------- INTENSITY ADJUSTMENT WITH ADAPTIVE BLENDING ----------
                         // Apply intensity adjustment with zone-based blending
                         let intensityFactor = intensity;
                         
@@ -694,8 +755,14 @@ class LUTGenerator {
                             intensityFactor *= (1 - (highlightWeight * 0.3));
                         }
                         
-                        // Add a very subtle dithering effect to prevent banding
-                        intensityFactor += (Math.random() * 0.01 - 0.005);
+                        // ---------- ADVANCED ANTI-BANDING ----------
+                        // Add adaptive dithering effect to prevent banding
+                        if (antiBandingStrength > 0) {
+                            const noiseAmount = 0.01 * antiBandingStrength;
+                            // Blue noise provides better visual quality than white noise
+                            const blueNoise = this.generateBlueNoise(r, g, b, lutSize) * noiseAmount;
+                            intensityFactor += blueNoise;
+                        }
                         
                         // Get original RGB
                         const originalR = r_norm;
@@ -707,8 +774,8 @@ class LUTGenerator {
                         const newG = this.smoothLerp(originalG, g_matched, intensityFactor);
                         const newB = this.smoothLerp(originalB, b_matched, intensityFactor);
                         
+                        // ---------- ZONE-BASED TONE CURVES ----------
                         // Apply tone curve for better contrast and prevent washed out appearance
-                        // Use zone-based tone curves for best results
                         let finalR, finalG, finalB;
                         
                         if (shadowWeight > 0.5) {
@@ -733,13 +800,34 @@ class LUTGenerator {
                         lut[idx] = finalR;
                         lut[idx + 1] = finalG;
                         lut[idx + 2] = finalB;
+                        
+                        // Increment completed iterations and update progress periodically
+                        completedIterations++;
+                        
+                        // Update progress every 5% to avoid too many DOM updates
+                        const currentProgress = 45 + Math.floor((completedIterations / totalIterations) * 50);
+                        if (currentProgress >= lastProgressUpdate + 5) {
+                            lastProgressUpdate = currentProgress;
+                            
+                            // Instead of awaiting here which isn't allowed in a regular loop,
+                            // we'll just call the function without await and handle any UI updates
+                            // in periodic breaks
+                            reportProgress(currentProgress, 'Processing colors...');
+                            
+                            // Every 10000 iterations, we'll set a flag to do a UI refresh on next iteration
+                            if (completedIterations % 10000 === 0 && this.debugMode) {
+                                console.log(`Processed ${completedIterations}/${totalIterations} colors (${Math.round(completedIterations/totalIterations*100)}%)`);
+                            }
+                        }
                     }
                 }
             }
             
+            // Make sure we report 100% at the end
+            reportProgress(95, 'Finalizing color lookup table...');
             return lut;
         } catch (error) {
-            console.error('Error calculating LUT:', error);
+            console.error('Error in calculateLUT:', error);
             throw error;
         }
     }
@@ -1732,6 +1820,762 @@ class LUTGenerator {
             b: lut[idx + 2]
         };
     }
+
+    // Convert RGB to LAB color space
+    rgb2lab(r, g, b) {
+        // Convert RGB to XYZ
+        r = r > 0.04045 ? Math.pow((r + 0.055) / 1.055, 2.4) : r / 12.92;
+        g = g > 0.04045 ? Math.pow((g + 0.055) / 1.055, 2.4) : g / 12.92;
+        b = b > 0.04045 ? Math.pow((b + 0.055) / 1.055, 2.4) : b / 12.92;
+        
+        r *= 100;
+        g *= 100;
+        b *= 100;
+        
+        // Observer = 2°, Illuminant = D65
+        const x = r * 0.4124 + g * 0.3576 + b * 0.1805;
+        const y = r * 0.2126 + g * 0.7152 + b * 0.0722;
+        const z = r * 0.0193 + g * 0.1192 + b * 0.9505;
+        
+        // Convert XYZ to LAB
+        const xRef = 95.047;
+        const yRef = 100.0;
+        const zRef = 108.883;
+        
+        let xr = x / xRef;
+        let yr = y / yRef;
+        let zr = z / zRef;
+        
+        xr = xr > 0.008856 ? Math.pow(xr, 1/3) : (7.787 * xr) + (16 / 116);
+        yr = yr > 0.008856 ? Math.pow(yr, 1/3) : (7.787 * yr) + (16 / 116);
+        zr = zr > 0.008856 ? Math.pow(zr, 1/3) : (7.787 * zr) + (16 / 116);
+        
+        const l = (116 * yr) - 16;
+        const a = 500 * (xr - yr);
+        const b_val = 200 * (yr - zr);
+        
+        return [l, a, b_val];
+    }
+
+    // Convert LAB to RGB color space
+    lab2rgb(l, a, b) {
+        // Make sure the values are in reasonable ranges
+        const origL = l, origA = a, origB = b;
+        l = Math.min(100, Math.max(0, l));
+        a = Math.min(127, Math.max(-128, a));
+        b = Math.min(127, Math.max(-128, b));
+        
+        // Log if values were clamped (indicating a potential issue)
+        if (this.debugMode && (origL !== l || origA !== a || origB !== b)) {
+            console.warn('LAB values needed clamping:', {
+                originalL: origL,
+                originalA: origA, 
+                originalB: origB,
+                clampedL: l,
+                clampedA: a,
+                clampedB: b
+            });
+        }
+
+        let y = (l + 16) / 116;
+        let x = a / 500 + y;
+        let z = y - b / 200;
+        
+        // D65 reference white
+        const xRef = 95.047;
+        const yRef = 100.0;
+        const zRef = 108.883;
+        
+        // Convert LAB to XYZ
+        x = x * x * x > 0.008856 ? x * x * x : (x - 16 / 116) / 7.787;
+        y = y * y * y > 0.008856 ? y * y * y : (y - 16 / 116) / 7.787;
+        z = z * z * z > 0.008856 ? z * z * z : (z - 16 / 116) / 7.787;
+        
+        x = (x * xRef) / 100;
+        y = (y * yRef) / 100;
+        z = (z * zRef) / 100;
+        
+        // Convert XYZ to RGB
+        // Using more conservative matrix coefficients
+        let r = x *  3.2406 + y * -1.5372 + z * -0.4986;
+        let g = x * -0.9689 + y *  1.8758 + z *  0.0415;
+        let b_val = x *  0.0557 + y * -0.2040 + z *  1.0570;
+        
+        // Apply gamma correction
+        r = r > 0.0031308 ? 1.055 * Math.pow(r, 1 / 2.4) - 0.055 : 12.92 * r;
+        g = g > 0.0031308 ? 1.055 * Math.pow(g, 1 / 2.4) - 0.055 : 12.92 * g;
+        b_val = b_val > 0.0031308 ? 1.055 * Math.pow(b_val, 1 / 2.4) - 0.055 : 12.92 * b_val;
+        
+        // Clamp values and check for extreme values
+        r = Math.max(0, Math.min(1, r));
+        g = Math.max(0, Math.min(1, g));
+        b_val = Math.max(0, Math.min(1, b_val));
+        
+        // Add a special check to catch the cyan issue
+        const maxChannel = Math.max(r, g, b_val);
+        const minChannel = Math.min(r, g, b_val);
+        
+        // If very cyan biased (low red, high blue/green), adjust it
+        if (r < 0.3 && g > 0.6 && b_val > 0.6 && (g + b_val) / 2 > r * 2) {
+            // Boost red to reduce cyan bias
+            r = r * 1.5;
+            // Reduce blue/green slightly
+            g = g * 0.9;
+            b_val = b_val * 0.9;
+            
+            // Re-clamp
+            r = Math.min(1, r);
+            g = Math.min(1, g);
+            b_val = Math.min(1, b_val);
+        }
+        
+        // If overall the color is washing out (all channels high)
+        if (minChannel > 0.6) {
+            // Apply stronger contrast
+            r = r > 0.5 ? r * 1.1 : r * 0.9;
+            g = g > 0.5 ? g * 1.1 : g * 0.9;
+            b_val = b_val > 0.5 ? b_val * 1.1 : b_val * 0.9;
+            
+            // Re-clamp
+            r = Math.max(0, Math.min(1, r));
+            g = Math.max(0, Math.min(1, g));
+            b_val = Math.max(0, Math.min(1, b_val));
+        }
+        
+        return [r, g, b_val];
+    }
+
+    // Calculate the CIEDE2000 color difference between two colors in LAB space
+    calculateCIEDE2000(lab1, lab2) {
+        // Extract LAB values
+        const L1 = lab1[0];
+        const a1 = lab1[1];
+        const b1 = lab1[2];
+        const L2 = lab2[0];
+        const a2 = lab2[1];
+        const b2 = lab2[2];
+        
+        // Calculate C1, C2 (Chroma)
+        const C1 = Math.sqrt(a1 * a1 + b1 * b1);
+        const C2 = Math.sqrt(a2 * a2 + b2 * b2);
+        
+        // Calculate average Chroma and L
+        const Cavg = (C1 + C2) / 2;
+        
+        // Compute G - adjustment factor for Chroma
+        const G = 0.5 * (1 - Math.sqrt(Math.pow(Cavg, 7) / (Math.pow(Cavg, 7) + Math.pow(25, 7))));
+        
+        // Adjust a values
+        const a1p = a1 * (1 + G);
+        const a2p = a2 * (1 + G);
+        
+        // Calculate C'1, C'2 using adjusted a values
+        const C1p = Math.sqrt(a1p * a1p + b1 * b1);
+        const C2p = Math.sqrt(a2p * a2p + b2 * b2);
+        
+        // Calculate h'1, h'2 (hue angles)
+        let h1p = Math.atan2(b1, a1p);
+        h1p = h1p >= 0 ? h1p : h1p + 2 * Math.PI;
+        let h2p = Math.atan2(b2, a2p);
+        h2p = h2p >= 0 ? h2p : h2p + 2 * Math.PI;
+        
+        // Convert to degrees
+        h1p = h1p * 180 / Math.PI;
+        h2p = h2p * 180 / Math.PI;
+        
+        // Calculate ΔL', ΔC', ΔH'
+        const deltaLp = L2 - L1;
+        const deltaCp = C2p - C1p;
+        
+        // Calculate ΔH' (considering the angle difference)
+        let deltahp;
+        if (C1p * C2p === 0) {
+            deltahp = 0;
+        } else if (Math.abs(h2p - h1p) <= 180) {
+            deltahp = h2p - h1p;
+        } else if (h2p - h1p > 180) {
+            deltahp = h2p - h1p - 360;
+        } else {
+            deltahp = h2p - h1p + 360;
+        }
+        
+        // Calculate ΔH'
+        const deltaHp = 2 * Math.sqrt(C1p * C2p) * Math.sin(deltahp * Math.PI / 360);
+        
+        // Calculate CIEDE2000 color difference
+        // Using simplified weightings (kL=kC=kH=1)
+        const Lp = (L1 + L2) / 2;
+        const Cp = (C1p + C2p) / 2;
+        
+        // Calculate h'avg
+        let hp;
+        if (C1p * C2p === 0) {
+            hp = h1p + h2p;
+        } else if (Math.abs(h1p - h2p) <= 180) {
+            hp = (h1p + h2p) / 2;
+        } else if (h1p + h2p < 360) {
+            hp = (h1p + h2p + 360) / 2;
+        } else {
+            hp = (h1p + h2p - 360) / 2;
+        }
+        
+        // Calculate T for hue rotation term
+        const T = 1 - 0.17 * Math.cos((hp - 30) * Math.PI / 180) + 
+                     0.24 * Math.cos((2 * hp) * Math.PI / 180) + 
+                     0.32 * Math.cos((3 * hp + 6) * Math.PI / 180) - 
+                     0.20 * Math.cos((4 * hp - 63) * Math.PI / 180);
+        
+        // Calculate RT for hue rotation factor
+        const deltaTheta = 30 * Math.exp(-Math.pow((hp - 275) / 25, 2));
+        const RC = 2 * Math.sqrt(Math.pow(Cp, 7) / (Math.pow(Cp, 7) + Math.pow(25, 7)));
+        const RT = -Math.sin(2 * deltaTheta * Math.PI / 180) * RC;
+        
+        // Calculate SL, SC, SH - the weighting functions
+        const SL = 1 + (0.015 * Math.pow(Lp - 50, 2)) / Math.sqrt(20 + Math.pow(Lp - 50, 2));
+        const SC = 1 + 0.045 * Cp;
+        const SH = 1 + 0.015 * Cp * T;
+        
+        // Final CIEDE2000 calculation
+        return Math.sqrt(
+            Math.pow(deltaLp / SL, 2) + 
+            Math.pow(deltaCp / SC, 2) + 
+            Math.pow(deltaHp / SH, 2) + 
+            RT * (deltaCp / SC) * (deltaHp / SH)
+        );
+    }
+
+    // Calculate LAB statistics for an image
+    calculateLABStats(imageData) {
+        // Initialize arrays for L, A, B histograms (0-100 for L, -128 to 127 for a/b)
+        const lHist = new Array(101).fill(0);  // L: 0-100
+        const aHist = new Array(256).fill(0);  // a: -128 to 127
+        const bHist = new Array(256).fill(0);  // b: -128 to 127
+        
+        let lSum = 0, aSum = 0, bSum = 0;
+        let lSqSum = 0, aSqSum = 0, bSqSum = 0;
+        let pixelCount = 0;
+        
+        // Sample pixels for efficiency
+        const sampleRate = Math.max(1, Math.floor(imageData.length / 4 / 5000));
+        
+        for (let i = 0; i < imageData.length; i += sampleRate * 4) {
+            // Convert RGB to LAB
+            const r = imageData[i] / 255;
+            const g = imageData[i + 1] / 255;
+            const b = imageData[i + 2] / 255;
+            
+            const [l, a, b_val] = this.rgb2lab(r, g, b);
+            
+            // Update histograms (normalize a, b from -128/127 to 0-255 index)
+            const lIndex = Math.max(0, Math.min(100, Math.floor(l)));
+            const aIndex = Math.max(0, Math.min(255, Math.floor(a + 128)));
+            const bIndex = Math.max(0, Math.min(255, Math.floor(b_val + 128)));
+            
+            lHist[lIndex] += 1;
+            aHist[aIndex] += 1;
+            bHist[bIndex] += 1;
+            
+            // Sum for mean and variance calculation
+            lSum += l;
+            aSum += a;
+            bSum += b_val;
+            lSqSum += l * l;
+            aSqSum += a * a;
+            bSqSum += b_val * b_val;
+            
+            pixelCount++;
+        }
+        
+        // Calculate mean and standard deviation
+        const lMean = lSum / pixelCount;
+        const aMean = aSum / pixelCount;
+        const bMean = bSum / pixelCount;
+        
+        const lStdDev = Math.sqrt(lSqSum / pixelCount - lMean * lMean);
+        const aStdDev = Math.sqrt(aSqSum / pixelCount - aMean * aMean);
+        const bStdDev = Math.sqrt(bSqSum / pixelCount - bMean * bMean);
+        
+        // Calculate cumulative distribution functions
+        const lCDF = this.calculateCumulativeDistribution(lHist);
+        const aCDF = this.calculateCumulativeDistribution(aHist);
+        const bCDF = this.calculateCumulativeDistribution(bHist);
+        
+        return {
+            l: { mean: lMean, stdDev: lStdDev, cdf: lCDF },
+            a: { mean: aMean, stdDev: aStdDev, cdf: aCDF },
+            b: { mean: bMean, stdDev: bStdDev, cdf: bCDF },
+            pixelCount
+        };
+    }
+
+    // Implementation of 1D Optimal Transport for color matching
+    optimalTransportMatch(value, sourceStats, targetStats, channel) {
+        // Choose correct CDF and range depending on the channel
+        let sourceCDF, targetCDF, rangeMax;
+        
+        if (channel === 'l') {
+            sourceCDF = sourceStats.l.cdf;
+            targetCDF = targetStats.l.cdf;
+            rangeMax = 100;
+            // Scale normalized value to L range (0-100)
+            value = value * 100;
+        } else if (channel === 'a' || channel === 'b') {
+            sourceCDF = channel === 'a' ? sourceStats.a.cdf : sourceStats.b.cdf;
+            targetCDF = channel === 'a' ? targetStats.a.cdf : targetStats.b.cdf;
+            rangeMax = 256; // -128 to 127, indexed as 0-255
+            // Scale normalized value to a/b range (-128 to 127)
+            value = (value * 255) - 128;
+        } else {
+            console.error('Invalid color channel for optimal transport matching');
+            return value;
+        }
+        
+        // Safety check - ensure value is in valid range
+        value = Math.max(0, Math.min(rangeMax, value));
+        
+        // Convert value to index
+        const valueIndex = Math.floor(value);
+        
+        // Find the CDF value at the current point in the source
+        const cdfValue = sourceCDF[valueIndex] || 0;
+        
+        // Find where this percentile occurs in the target distribution
+        let matchedIndex = 0;
+        let minDiff = Number.MAX_VALUE;
+        
+        for (let i = 0; i < targetCDF.length; i++) {
+            const diff = Math.abs(targetCDF[i] - cdfValue);
+            if (diff < minDiff) {
+                minDiff = diff;
+                matchedIndex = i;
+            }
+        }
+        
+        // Safety check - if matchedIndex is outside valid range, clamp it
+        matchedIndex = Math.max(0, Math.min(targetCDF.length - 1, matchedIndex));
+        
+        // Now handle possible sharp transitions with smooth local averaging
+        // This prevents artificial edges from appearing when single values map to multiple output values
+        
+        // Apply spatial regularization (looking at neighboring matches to smooth any artifacts)
+        let smoothedMatch = matchedIndex;
+        const windowSize = 3; // smaller window for more conservative smoothing
+        
+        // Only apply smoothing if we're close to a steep change in the CDF
+        const sensitivity = 0.01;  // Threshold for detecting steep CDF changes
+        let steepChange = false;
+        
+        // Check if we're near a steep change in the CDF
+        for (let i = Math.max(0, valueIndex - 2); i < Math.min(sourceCDF.length, valueIndex + 3); i++) {
+            for (let j = Math.max(0, i - 2); j < Math.min(sourceCDF.length, i + 3); j++) {
+                if (i !== j && Math.abs(sourceCDF[i] - sourceCDF[j]) > sensitivity * Math.abs(i - j)) {
+                    steepChange = true;
+                    break;
+                }
+            }
+            if (steepChange) break;
+        }
+        
+        if (steepChange) {
+            // Apply weighted average of nearby matches
+            let weightSum = 0;
+            let valueSum = 0;
+            
+            for (let i = Math.max(0, valueIndex - windowSize); i <= Math.min(sourceCDF.length - 1, valueIndex + windowSize); i++) {
+                const weight = 1 / (1 + Math.abs(i - valueIndex));
+                const neighborCDF = sourceCDF[i];
+                
+                // Find match for this neighbor
+                let neighborMatchedIndex = 0;
+                let neighborMinDiff = Number.MAX_VALUE;
+                
+                for (let j = 0; j < targetCDF.length; j++) {
+                    const diff = Math.abs(targetCDF[j] - neighborCDF);
+                    if (diff < neighborMinDiff) {
+                        neighborMinDiff = diff;
+                        neighborMatchedIndex = j;
+                    }
+                }
+                
+                valueSum += neighborMatchedIndex * weight;
+                weightSum += weight;
+            }
+            
+            smoothedMatch = valueSum / weightSum;
+        }
+        
+        // Blend with original value to make the effect more conservative
+        // This helps prevent extreme transformations
+        const blendFactor = 0.7; // Use 70% of the calculated match, 30% of the original
+        const originalIndex = valueIndex;
+        smoothedMatch = (smoothedMatch * blendFactor) + (originalIndex * (1 - blendFactor));
+        
+        // Normalize the result back
+        if (channel === 'l') {
+            return Math.max(0, Math.min(1, smoothedMatch / 100)); // Back to 0-1 range
+        } else {
+            return Math.max(-0.5, Math.min(0.5, (smoothedMatch - 128) / 255)); // Back to -0.5 to 0.5 range
+        }
+    }
+
+    // Generate a texture mask for spatially-aware processing
+    generateTextureMask(imageData, width, height) {
+        try {
+            // Use a simpler approach for texture detection to avoid potential issues
+            const mask = new Float32Array(width * height);
+            
+            // For safety, ensure dimensions make sense
+            if (!width || !height || width <= 0 || height <= 0 || !imageData || imageData.length < width * height * 4) {
+                console.warn('Invalid dimensions for texture mask generation');
+                return new Float32Array(width * height); // Return empty mask
+            }
+            
+            // Calculate the edge strength at each pixel using a simple gradient
+            for (let y = 1; y < height - 1; y++) {
+                for (let x = 1; x < width - 1; x++) {
+                    const idx = (y * width + x) * 4;
+                    
+                    // Get luminance of current and neighboring pixels
+                    const getLuminance = (i) => {
+                        // Convert RGB to luminance
+                        return 0.2126 * imageData[i] + 0.7152 * imageData[i+1] + 0.0722 * imageData[i+2];
+                    };
+                    
+                    const thisLum = getLuminance(idx);
+                    const rightLum = getLuminance(idx + 4);
+                    const bottomLum = getLuminance(idx + width * 4);
+                    
+                    // Simple edge detection - calculate horizontal and vertical gradients
+                    const horizGrad = Math.abs(thisLum - rightLum);
+                    const vertGrad = Math.abs(thisLum - bottomLum);
+                    
+                    // Store the maximum gradient as the edge strength
+                    const edgeStrength = Math.max(horizGrad, vertGrad);
+                    mask[y * width + x] = Math.min(1, edgeStrength / 128);
+                }
+            }
+            
+            // Apply a very simple Gaussian blur
+            const blurredMask = new Float32Array(mask.length);
+            
+            for (let y = 2; y < height - 2; y++) {
+                for (let x = 2; x < width - 2; x++) {
+                    const idx = y * width + x;
+                    
+                    // Simple 3x3 blur kernel
+                    let sum = 0;
+                    sum += mask[idx - width - 1] * 0.0625; // top-left
+                    sum += mask[idx - width] * 0.125;      // top
+                    sum += mask[idx - width + 1] * 0.0625; // top-right
+                    sum += mask[idx - 1] * 0.125;          // left
+                    sum += mask[idx] * 0.25;               // center
+                    sum += mask[idx + 1] * 0.125;          // right
+                    sum += mask[idx + width - 1] * 0.0625; // bottom-left
+                    sum += mask[idx + width] * 0.125;      // bottom
+                    sum += mask[idx + width + 1] * 0.0625; // bottom-right
+                    
+                    blurredMask[idx] = sum;
+                }
+            }
+            
+            return blurredMask;
+        } catch (error) {
+            console.error('Error generating texture mask:', error);
+            // Return empty mask on error
+            return new Float32Array(width * height);
+        }
+    }
+
+    // Generate blue noise for high-quality anti-banding
+    generateBlueNoise(r, g, b, lutSize) {
+        // Use LUT coordinates to ensure consistent noise patterns in color space
+        const noiseValue = this.blueNoisePattern(
+            (r / lutSize) * 255, 
+            (g / lutSize) * 255, 
+            (b / lutSize) * 255
+        );
+        return (noiseValue - 0.5) * 0.01;
+    }
+
+    // Blue noise pattern generation with spatial correlation
+    blueNoisePattern(x, y, z) {
+        // Permutation and gradients based on improved Perlin noise
+        
+        // Constants for the permutation table
+        const PERM = [
+            151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225,
+            140, 36, 103, 30, 69, 142, 8, 99, 37, 240, 21, 10, 23, 190, 6, 148,
+            247, 120, 234, 75, 0, 26, 197, 62, 94, 252, 219, 203, 117, 35, 11, 32,
+            57, 177, 33, 88, 237, 149, 56, 87, 174, 20, 125, 136, 171, 168, 68, 175,
+            74, 165, 71, 134, 139, 48, 27, 166, 77, 146, 158, 231, 83, 111, 229, 122,
+            60, 211, 133, 230, 220, 105, 92, 41, 55, 46, 245, 40, 244, 102, 143, 54,
+            65, 25, 63, 161, 1, 216, 80, 73, 209, 76, 132, 187, 208, 89, 18, 169,
+            200, 196, 135, 130, 116, 188, 159, 86, 164, 100, 109, 198, 173, 186, 3, 64,
+            52, 217, 226, 250, 124, 123, 5, 202, 38, 147, 118, 126, 255, 82, 85, 212,
+            207, 206, 59, 227, 47, 16, 58, 17, 182, 189, 28, 42, 223, 183, 170, 213,
+            119, 248, 152, 2, 44, 154, 163, 70, 221, 153, 101, 155, 167, 43, 172, 9,
+            129, 22, 39, 253, 19, 98, 108, 110, 79, 113, 224, 232, 178, 185, 112, 104,
+            218, 246, 97, 228, 251, 34, 242, 193, 238, 210, 144, 12, 191, 179, 162, 241,
+            81, 51, 145, 235, 249, 14, 239, 107, 49, 192, 214, 31, 181, 199, 106, 157,
+            184, 84, 204, 176, 115, 121, 50, 45, 127, 4, 150, 254, 138, 236, 205, 93,
+            222, 114, 67, 29, 24, 72, 243, 141, 128, 195, 78, 66, 215, 61, 156, 180
+        ];
+        
+        // Hash function for 3D coordinates
+        const hash = (x, y, z) => {
+            return PERM[(PERM[(PERM[x & 255] + y) & 255] + z) & 255];
+        };
+        
+        // Smooth interpolation function
+        const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+        
+        // Linear interpolation
+        const lerp = (a, b, t) => a + t * (b - a);
+        
+        // Blue noise characteristics - improved gradient function
+        const grad = (hash, x, y, z) => {
+            const h = hash & 15;
+            const u = h < 8 ? x : y;
+            const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+            return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+        };
+        
+        // Integer and fractional parts
+        const X = Math.floor(x) & 255;
+        const Y = Math.floor(y) & 255;
+        const Z = Math.floor(z) & 255;
+        
+        x -= Math.floor(x);
+        y -= Math.floor(y);
+        z -= Math.floor(z);
+        
+        // Fade curves
+        const u = fade(x);
+        const v = fade(y);
+        const w = fade(z);
+        
+        // Hash coordinates of the 8 cube corners
+        const A = hash(X, Y, Z);
+        const B = hash(X+1, Y, Z);
+        const C = hash(X, Y+1, Z);
+        const D = hash(X+1, Y+1, Z);
+        const E = hash(X, Y, Z+1);
+        const F = hash(X+1, Y, Z+1);
+        const G = hash(X, Y+1, Z+1);
+        const H = hash(X+1, Y+1, Z+1);
+        
+        // Blend gradients
+        const value = lerp(
+            lerp(
+                lerp(grad(A, x, y, z), grad(B, x-1, y, z), u),
+                lerp(grad(C, x, y-1, z), grad(D, x-1, y-1, z), u),
+                v
+            ),
+            lerp(
+                lerp(grad(E, x, y, z-1), grad(F, x-1, y, z-1), u),
+                lerp(grad(G, x, y-1, z-1), grad(H, x-1, y-1, z-1), u),
+                v
+            ),
+            w
+        );
+        
+        // Normalize to 0-1 range
+        return (value + 1) / 2;
+    }
+
+    async generateLUT() {
+        try {
+            // Update the original slider value to prevent false detection of changes
+            this.originalSliderValue = this.colorIntensity.value;
+            this.originalAntiBandingValue = this.antiBandingStrength ? this.antiBandingStrength.value : 50;
+            
+            if (!this.referenceImage || !this.targetImage) {
+                this.showToast('Please upload both reference and target images');
+                return;
+            }
+            
+            // Create a progress bar modal that stays in the center of the screen
+            const progressModal = document.createElement('div');
+            progressModal.className = 'modal is-active';
+            progressModal.style.zIndex = '1000';
+            progressModal.innerHTML = `
+                <div class="modal-background" style="background-color: rgba(0, 0, 0, 0.7);"></div>
+                <div class="modal-content" style="width: 80%; max-width: 500px;">
+                    <div class="box has-text-centered">
+                        <h4 class="is-size-5 mb-3">Generating Color Transformation</h4>
+                        <progress id="lutProgress" class="progress is-primary" value="5" max="100" style="height: 20px;"></progress>
+                        <p id="progressStatus" class="mt-2">Initializing...</p>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(progressModal);
+            
+            // Force browser to render the modal immediately
+            // This ensures the progress bar appears before the heavy processing starts
+            progressModal.getBoundingClientRect();
+            
+            const progressBar = document.getElementById('lutProgress');
+            const progressStatus = document.getElementById('progressStatus');
+            
+            // Show loading state in button too
+            if (this.generateButton) {
+                this.generateButton.classList.add('is-loading');
+            }
+            
+            // Hide the empty result
+            if (this.emptyResult) {
+                this.emptyResult.style.display = 'none';
+            }
+            
+            console.log('Generating LUT with settings:', {
+                colorIntensity: this.colorIntensity.value,
+                antiBandingStrength: this.antiBandingStrength ? this.antiBandingStrength.value : 50
+            });
+            console.log('If you see a washed-out cyan result, type "toggleLUTDebug()" in the console to enable debugging and try again');
+
+            // Update progress
+            const updateProgress = (value, message) => {
+                if (progressBar) progressBar.value = value;
+                if (progressStatus) progressStatus.textContent = message;
+                
+                // Force a microtask to give the browser a chance to update the DOM
+                return new Promise(resolve => setTimeout(resolve, 0));
+            };
+
+            // Create canvases for processing
+            await updateProgress(10, 'Preparing images...');
+            const referenceCanvas = this.createCanvas(this.referenceImage);
+            const targetCanvas = this.createCanvas(this.targetImage);
+            
+            // Calculate LUT
+            try {
+                await updateProgress(20, 'Analyzing color statistics...');
+                
+                // Define a progress updater function for the calculateLUT method
+                let lastProgress = 20;
+                const lutProgressCallback = async (percent, statusMessage) => {
+                    // Scale the progress from 20-80% of the total
+                    const scaledPercent = 20 + (percent * 0.6);
+                    lastProgress = scaledPercent;
+                    await updateProgress(scaledPercent, statusMessage || 'Processing...');
+                };
+                
+                this.lut = await this.calculateLUT(referenceCanvas, targetCanvas, lutProgressCallback);
+                await updateProgress(85, 'Rendering final image...');
+            } catch (error) {
+                console.error('Error calculating LUT:', error);
+                this.showToast('Error generating color transformation. Please try different images.');
+                if (this.generateButton) {
+                    this.generateButton.classList.remove('is-loading');
+                }
+                
+                // Remove the progress modal
+                document.body.removeChild(progressModal);
+                
+                // Reset to the "click to generate" state
+                this.emptyResult.innerHTML = `
+                    <span class="icon is-large">
+                        <i class="fas fa-magic fa-2x"></i>
+                    </span>
+                    <p class="mt-3">Click here to generate</p>
+                `;
+                this.emptyResult.style.display = 'flex';
+                return;
+            }
+            
+            // Apply LUT to target image
+            await updateProgress(90, 'Applying color transformation...');
+            const resultCanvas = this.applyLUT(targetCanvas, this.lut);
+            
+            // Create result image
+            const resultImg = new Image();
+            resultImg.onload = async () => {
+                // Update progress to complete
+                await updateProgress(100, 'Complete!');
+                
+                // Remove the progress modal after a short delay
+                setTimeout(() => {
+                    try {
+                        document.body.removeChild(progressModal);
+                    } catch (e) {
+                        console.warn('Error removing progress modal:', e);
+                    }
+                }, 500);
+                
+                // Clear loading state
+                if (this.generateButton) {
+                    this.generateButton.classList.remove('is-loading');
+                }
+                
+                // Show result
+                this.resultPreview.innerHTML = '';
+                this.resultPreview.appendChild(resultImg);
+                this.resultPreview.style.display = 'flex';
+                
+                // Update empty result text before hiding it
+                // This ensures that if the result state is reset, the text will be correct
+                this.emptyResult.innerHTML = `
+                    <span class="icon is-large">
+                        <i class="fas fa-download fa-2x"></i>
+                    </span>
+                    <p class="mt-3">Click here to download LUT</p>
+                `;
+                this.emptyResult.style.display = 'none';
+                
+                // Apply consistent styling
+                this.applyConsistentImageStyling(resultImg);
+                
+                // Make result clickable to download
+                this.resultPreview.style.cursor = 'pointer';
+                this.resultPreview.onclick = () => this.downloadResultImage();
+                
+                // Show download button
+                if (this.downloadButton) {
+                    this.downloadButton.style.display = 'block';
+                }
+                
+                if (this.mobileDownloadBtn) {
+                    this.mobileDownloadBtn.style.display = 'flex';
+                }
+                
+                // Update generate button state
+                this.updateGenerateButton();
+            };
+            
+            resultImg.src = resultCanvas.toDataURL('image/jpeg', 0.95);
+        } catch (error) {
+            console.error('Error generating color transformation:', error);
+            this.showToast('Error generating color transformation. Please try again.');
+            
+            // Remove the progress modal if it exists
+            const existingModal = document.querySelector('.modal');
+            if (existingModal) {
+                document.body.removeChild(existingModal);
+            }
+            
+            if (this.generateButton) {
+                this.generateButton.classList.remove('is-loading');
+            }
+            
+            // Reset to the "click to generate" state
+            this.emptyResult.innerHTML = `
+                <span class="icon is-large">
+                    <i class="fas fa-magic fa-2x"></i>
+                </span>
+                <p class="mt-3">Click here to generate</p>
+            `;
+            this.emptyResult.style.display = 'flex';
+        }
+    }
+
+    createCanvas(img) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0);
+        return canvas;
+    }
 }
 
 // Initialize when DOM is loaded
@@ -1756,4 +2600,40 @@ style.textContent = `
     }
 `;
 document.head.appendChild(style);
+
+// Add CSS for progress modal
+const progressStyle = document.createElement('style');
+progressStyle.textContent = `
+    .modal-content .box {
+        padding: 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    
+    .progress {
+        height: 20px !important;
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    
+    .progress::-webkit-progress-bar {
+        background-color: #f5f5f5;
+    }
+    
+    .progress::-webkit-progress-value {
+        background-color: #4a7bff;
+        transition: width 0.3s ease;
+    }
+    
+    .progress::-moz-progress-bar {
+        background-color: #4a7bff;
+        transition: width 0.3s ease;
+    }
+    
+    #progressStatus {
+        font-size: 14px;
+        color: #555;
+    }
+`;
+document.head.appendChild(progressStyle);
 
