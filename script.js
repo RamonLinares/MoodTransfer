@@ -575,9 +575,17 @@ class LUTGenerator {
             const refData = refCtx.getImageData(0, 0, referenceCanvas.width, referenceCanvas.height);
             const targetData = targetCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
             
-            // Calculate image statistics
+            // Calculate image statistics in both RGB and HSL spaces
             const refStats = this.calculateImageStats(refData.data);
             const targetStats = this.calculateImageStats(targetData.data);
+            
+            // Analyze color temperature of reference image for more accurate matching
+            const refTemperature = this.analyzeColorTemperature(refData.data);
+            const targetTemperature = this.analyzeColorTemperature(targetData.data);
+            
+            // Calculate HSL statistics for better color mapping
+            const refHslStats = this.calculateHSLStats(refData.data);
+            const targetHslStats = this.calculateHSLStats(targetData.data);
             
             // Create LUT
             const lutSize = 33; // Standard size for most applications
@@ -599,10 +607,31 @@ class LUTGenerator {
                         const g_norm = g / (lutSize - 1);
                         const b_norm = b / (lutSize - 1);
                         
-                        // Apply histogram matching for each channel
+                        // Calculate luminance to determine which zone this color falls into
+                        const luminance = 0.2126 * r_norm + 0.7152 * g_norm + 0.0722 * b_norm;
+                        
+                        // Zone weights for shadows, midtones, and highlights
+                        const shadowWeight = Math.max(0, 1 - luminance * 3.3); // Full effect until ~0.3, then taper
+                        const midtoneWeight = 1 - Math.abs((luminance - 0.5) * 2.5); // Peak at 0.5, taper to 0
+                        const highlightWeight = Math.max(0, (luminance - 0.7) * 3.3); // Start at ~0.7, increase
+                        
+                        // Convert to HSL for hue-based processing
+                        const hsl = this.rgb2hsl(r_norm, g_norm, b_norm);
+                        
+                        // Apply histogram matching for each channel with zone-based adjustments
                         let r_matched = this.histogramMatch(r_norm, targetStats.r, refStats.r);
                         let g_matched = this.histogramMatch(g_norm, targetStats.g, refStats.g);
                         let b_matched = this.histogramMatch(b_norm, targetStats.b, refStats.b);
+                        
+                        // HSL-based matching for more accurate color transformation
+                        const hslMatched = this.matchHSL(hsl, targetHslStats, refHslStats);
+                        const rgbFromHsl = this.hsl2rgb(hslMatched[0], hslMatched[1], hslMatched[2]);
+                        
+                        // Blend RGB-based and HSL-based matching for better results
+                        // Shadows favor HSL matching, highlights favor RGB matching
+                        r_matched = (r_matched * 0.6) + (rgbFromHsl[0] * 0.4);
+                        g_matched = (g_matched * 0.6) + (rgbFromHsl[1] * 0.4);
+                        b_matched = (b_matched * 0.6) + (rgbFromHsl[2] * 0.4);
                         
                         // Check if the reference image is black and white
                         if (isReferenceMonochrome) {
@@ -613,28 +642,50 @@ class LUTGenerator {
                         } else {
                             // Enhanced color processing for color images
                             
-                            // Apply split toning - different color tints for shadows and highlights
-                            const luminance = 0.2126 * r_norm + 0.7152 * g_norm + 0.0722 * b_norm;
+                            // Apply color temperature correction based on reference image
+                            // This helps match the overall warmth/coolness
+                            if (refTemperature.temperature === 'warm' && refTemperature.strength > 0.1) {
+                                // Warm up colors (increase red, decrease blue)
+                                const tempFactor = refTemperature.strength * intensity * 0.15;
+                                r_matched = Math.min(1, r_matched * (1 + tempFactor));
+                                b_matched = Math.max(0, b_matched * (1 - tempFactor * 0.5));
+                            } else if (refTemperature.temperature === 'cool' && refTemperature.strength > 0.1) {
+                                // Cool down colors (increase blue, decrease red)
+                                const tempFactor = refTemperature.strength * intensity * 0.15;
+                                b_matched = Math.min(1, b_matched * (1 + tempFactor));
+                                r_matched = Math.max(0, r_matched * (1 - tempFactor * 0.5));
+                            }
                             
-                            // Split toning (shadows get slightly warmer, highlights slightly cooler)
-                            if (luminance < 0.5) {
+                            // Apply split toning - different color tints for shadows and highlights
+                            // Adjust using zone weights for more natural transitions
+                            if (shadowWeight > 0) {
                                 // Warm up shadows (more red, less blue)
-                                const shadowIntensity = (0.5 - luminance) * 2 * intensity * 0.2;
+                                const shadowIntensity = shadowWeight * intensity * 0.2;
                                 r_matched += shadowIntensity * 0.1;
                                 b_matched -= shadowIntensity * 0.05;
-                            } else {
+                            }
+                            
+                            if (highlightWeight > 0) {
                                 // Cool highlights (more blue, less yellow) - gentler application
                                 // Apply less effect as we approach extreme highlights
                                 const highlightFactor = Math.min(1, 2.5 - 2 * luminance); // Reduces effect for values > 0.75
-                                const highlightIntensity = (luminance - 0.5) * 2 * intensity * 0.1 * highlightFactor;
-                                b_matched += highlightIntensity * 0.05; // Reduced from 0.08
-                                g_matched -= highlightIntensity * 0.02; // Reduced from 0.03
+                                const highlightIntensity = highlightWeight * intensity * 0.1 * highlightFactor;
+                                b_matched += highlightIntensity * 0.05;
+                                g_matched -= highlightIntensity * 0.02;
                             }
                             
-                            // Enhance contrast based on reference image characteristics
+                            // Zone-based contrast enhancement
                             if (isHighContrast) {
-                                // Apply more pronounced contrast enhancement
-                                [r_matched, g_matched, b_matched] = this.enhanceContrast([r_matched, g_matched, b_matched], intensity);
+                                if (shadowWeight > 0.5) {
+                                    // Shadow contrast enhancement
+                                    [r_matched, g_matched, b_matched] = this.enhanceContrast([r_matched, g_matched, b_matched], intensity * shadowWeight);
+                                } else if (midtoneWeight > 0.5) {
+                                    // Midtone contrast enhancement (stronger)
+                                    [r_matched, g_matched, b_matched] = this.enhanceContrast([r_matched, g_matched, b_matched], intensity * midtoneWeight * 1.2);
+                                } else if (highlightWeight > 0.5) {
+                                    // Highlight contrast enhancement (gentler)
+                                    [r_matched, g_matched, b_matched] = this.enhanceContrast([r_matched, g_matched, b_matched], intensity * highlightWeight * 0.7);
+                                }
                             }
                             
                             // Boost dominant color slightly for more cinematic look
@@ -643,9 +694,13 @@ class LUTGenerator {
                             }
                         }
                         
-                        // Apply intensity adjustment
-                        // Base intensity effect - how much of the original color to keep
+                        // Apply intensity adjustment with zone-based blending
                         let intensityFactor = intensity;
+                        
+                        // Apply more subtle transformation to highlights for a more natural look
+                        if (highlightWeight > 0.3) {
+                            intensityFactor *= (1 - (highlightWeight * 0.3));
+                        }
                         
                         // Add a very subtle dithering effect to prevent banding
                         intensityFactor += (Math.random() * 0.01 - 0.005);
@@ -661,9 +716,25 @@ class LUTGenerator {
                         const newB = this.smoothLerp(originalB, b_matched, intensityFactor);
                         
                         // Apply tone curve for better contrast and prevent washed out appearance
-                        const finalR = this.toneCurve(newR);
-                        const finalG = this.toneCurve(newG);
-                        const finalB = this.toneCurve(newB);
+                        // Use zone-based tone curves for best results
+                        let finalR, finalG, finalB;
+                        
+                        if (shadowWeight > 0.5) {
+                            // Shadow tone curve (gentler to preserve shadow detail)
+                            finalR = this.toneCurveShadows(newR);
+                            finalG = this.toneCurveShadows(newG);
+                            finalB = this.toneCurveShadows(newB);
+                        } else if (highlightWeight > 0.5) {
+                            // Highlight tone curve (very gentle to protect highlights)
+                            finalR = this.toneCurveHighlights(newR);
+                            finalG = this.toneCurveHighlights(newG);
+                            finalB = this.toneCurveHighlights(newB);
+                        } else {
+                            // Midtone tone curve (standard)
+                            finalR = this.toneCurve(newR);
+                            finalG = this.toneCurve(newG);
+                            finalB = this.toneCurve(newB);
+                        }
                         
                         // Store in LUT
                         const idx = (r * lutSize * lutSize + g * lutSize + b) * 3;
@@ -681,21 +752,9 @@ class LUTGenerator {
         }
     }
     
-    // Helper method to detect if the image has high contrast
-    detectHighContrast(stats) {
-        // Check the standard deviation of luminance
-        const rWeight = 0.2126;
-        const gWeight = 0.7152;
-        const bWeight = 0.0722;
-        
-        const stdDev = rWeight * stats.r.stdDev + gWeight * stats.g.stdDev + bWeight * stats.b.stdDev;
-        
-        // Higher standard deviation indicates higher contrast
-        return stdDev > 0.2; // Threshold determined empirically
-    }
-    
-    // Helper method to detect the dominant color
-    detectDominantColor(imageData) {
+    // Helper method to analyze color temperature of an image
+    analyzeColorTemperature(imageData) {
+        // Sample pixels from image to determine color temperature
         let rSum = 0, gSum = 0, bSum = 0;
         let pixelCount = 0;
         
@@ -709,322 +768,202 @@ class LUTGenerator {
             pixelCount++;
         }
         
-        // Average RGB values
+        // Calculate average R, G, B values
         const rAvg = rSum / pixelCount;
-        const gAvg = gSum / pixelCount;
         const bAvg = bSum / pixelCount;
         
-        // Find the dominant channel
-        if (rAvg > gAvg && rAvg > bAvg && rAvg > 100) {
-            return 'red';
-        } else if (gAvg > rAvg && gAvg > bAvg && gAvg > 100) {
-            return 'green';
-        } else if (bAvg > rAvg && bAvg > gAvg && bAvg > 100) {
-            return 'blue';
-        } else if (rAvg > 100 && gAvg > 100 && rAvg > bAvg && gAvg > bAvg) {
-            return 'yellow';
-        } else if (rAvg > 100 && bAvg > 100 && rAvg > gAvg && bAvg > gAvg) {
-            return 'magenta';
-        } else if (gAvg > 100 && bAvg > 100 && gAvg > rAvg && bAvg > rAvg) {
-            return 'cyan';
-        }
+        // Calculate R/B ratio which correlates to color temperature
+        const rbRatio = rAvg / bAvg;
         
-        return null; // No strong dominant color
+        return {
+            // Warm if R > B, cool if B > R
+            temperature: rbRatio > 1.05 ? 'warm' : (rbRatio < 0.95 ? 'cool' : 'neutral'),
+            // How strong is the temperature bias
+            strength: Math.abs(rbRatio - 1)
+        };
     }
     
-    // Enhance contrast based on the input color
-    enhanceContrast(color, intensity) {
-        const [r, g, b] = color;
+    // Calculate HSL statistics for an image
+    calculateHSLStats(imageData) {
+        // Initialize arrays for H, S, L histograms
+        const hueHist = new Array(360).fill(0);
+        const satHist = new Array(101).fill(0);
+        const lightHist = new Array(101).fill(0);
         
-        // Apply a subtle S-curve to increase contrast
-        const enhanceFactor = 0.2 * intensity;
+        let pixelCount = 0;
         
-        const enhanceChannel = (value) => {
-            // Center around 0.5
-            const centered = value - 0.5;
+        // Sample pixels for efficiency
+        const sampleRate = Math.max(1, Math.floor(imageData.length / 4 / 5000));
+        
+        for (let i = 0; i < imageData.length; i += sampleRate * 4) {
+            // Convert RGB to HSL
+            const r = imageData[i] / 255;
+            const g = imageData[i + 1] / 255;
+            const b = imageData[i + 2] / 255;
             
-            // Apply less enhancement to highlights
-            let enhancementMultiplier = 1.0;
-            if (value > 0.7) {
-                // Gradually reduce enhancement for highlights
-                enhancementMultiplier = 1.0 - ((value - 0.7) / 0.3) * 0.5;
-            }
+            const [h, s, l] = this.rgb2hsl(r, g, b);
             
-            // Apply cubic function for S-curve with reduced effect on highlights
-            const enhanced = centered * (1 + enhanceFactor * Math.abs(centered) * enhancementMultiplier);
+            // Update histograms
+            hueHist[Math.floor(h * 359)] += 1;
+            satHist[Math.floor(s * 100)] += 1;
+            lightHist[Math.floor(l * 100)] += 1;
             
-            // Re-center and clamp
-            return Math.max(0, Math.min(1, enhanced + 0.5));
+            pixelCount++;
+        }
+        
+        // Calculate cumulative distribution functions
+        const hueCDF = this.calculateCumulativeDistribution(hueHist);
+        const satCDF = this.calculateCumulativeDistribution(satHist);
+        const lightCDF = this.calculateCumulativeDistribution(lightHist);
+        
+        return {
+            hueCDF,
+            satCDF,
+            lightCDF,
+            pixelCount
         };
+    }
+    
+    // Helper to calculate CDF from histogram
+    calculateCumulativeDistribution(histogram) {
+        const cdf = new Array(histogram.length).fill(0);
+        let sum = 0;
+        const total = histogram.reduce((a, b) => a + b, 0);
+        
+        for (let i = 0; i < histogram.length; i++) {
+            sum += histogram[i];
+            cdf[i] = sum / total;
+        }
+        
+        return cdf;
+    }
+    
+    // Match HSL values using the reference and target statistics
+    matchHSL(hsl, targetHslStats, refHslStats) {
+        const [h, s, l] = hsl;
+        
+        // Find matching values using the CDFs
+        // For hue, we need to handle the circular nature
+        const hueIndex = Math.floor(h * 359);
+        const targetHueValue = targetHslStats.hueCDF[hueIndex];
+        
+        // Find closest match in reference CDF
+        let matchedHueIndex = 0;
+        let minDiff = 1;
+        
+        for (let i = 0; i < 360; i++) {
+            const diff = Math.abs(refHslStats.hueCDF[i] - targetHueValue);
+            if (diff < minDiff) {
+                minDiff = diff;
+                matchedHueIndex = i;
+            }
+        }
+        
+        // Same for saturation and lightness
+        const satIndex = Math.floor(s * 100);
+        const targetSatValue = targetHslStats.satCDF[satIndex];
+        let matchedSatIndex = this.findClosestCDFMatch(targetSatValue, refHslStats.satCDF);
+        
+        const lightIndex = Math.floor(l * 100);
+        const targetLightValue = targetHslStats.lightCDF[lightIndex];
+        let matchedLightIndex = this.findClosestCDFMatch(targetLightValue, refHslStats.lightCDF);
         
         return [
-            enhanceChannel(r),
-            enhanceChannel(g),
-            enhanceChannel(b)
+            matchedHueIndex / 359,
+            matchedSatIndex / 100,
+            matchedLightIndex / 100
         ];
     }
     
-    // Boost the dominant color slightly for more cinematic look
-    boostDominantColor(color, dominantColor, intensity) {
-        const [r, g, b] = color;
-        const boost = 0.05 * intensity;
-        
-        switch (dominantColor) {
-            case 'red':
-                return [Math.min(1, r + boost), g, b];
-            case 'green':
-                return [r, Math.min(1, g + boost), b];
-            case 'blue':
-                return [r, g, Math.min(1, b + boost)];
-            case 'yellow':
-                return [Math.min(1, r + boost * 0.7), Math.min(1, g + boost * 0.7), b];
-            case 'magenta':
-                return [Math.min(1, r + boost * 0.7), g, Math.min(1, b + boost * 0.7)];
-            case 'cyan':
-                return [r, Math.min(1, g + boost * 0.7), Math.min(1, b + boost * 0.7)];
-            default:
-                return [r, g, b];
-        }
-    }
-    
-    calculateHistograms(imageData) {
-        const histR = new Array(256).fill(0);
-        const histG = new Array(256).fill(0);
-        const histB = new Array(256).fill(0);
-        
-        for (let i = 0; i < imageData.length; i += 4) {
-            histR[imageData[i]]++;
-            histG[imageData[i + 1]]++;
-            histB[imageData[i + 2]]++;
-        }
-        
-        return { r: histR, g: histG, b: histB };
-    }
-    
-    calculateCDFs(histograms) {
-        const cdfR = new Array(256).fill(0);
-        const cdfG = new Array(256).fill(0);
-        const cdfB = new Array(256).fill(0);
-        
-        const pixelCount = histograms.r.reduce((sum, val) => sum + val, 0);
-        
-        let sumR = 0, sumG = 0, sumB = 0;
-        for (let i = 0; i < 256; i++) {
-            sumR += histograms.r[i];
-            sumG += histograms.g[i];
-            sumB += histograms.b[i];
-            
-            cdfR[i] = sumR / pixelCount;
-            cdfG[i] = sumG / pixelCount;
-            cdfB[i] = sumB / pixelCount;
-        }
-        
-        return { r: cdfR, g: cdfG, b: cdfB };
-    }
-    
-    createMatchingLUTs(refCDFs, targetCDFs) {
-        const lutR = new Array(256).fill(0);
-        const lutG = new Array(256).fill(0);
-        const lutB = new Array(256).fill(0);
-        
-        for (let i = 0; i < 256; i++) {
-            lutR[i] = this.findClosestMatch(targetCDFs.r[i], refCDFs.r);
-            lutG[i] = this.findClosestMatch(targetCDFs.g[i], refCDFs.g);
-            lutB[i] = this.findClosestMatch(targetCDFs.b[i], refCDFs.b);
-        }
-        
-        return { r: lutR, g: lutG, b: lutB };
-    }
-    
-    findClosestMatch(value, cdf) {
-        let minDiff = 1.0;
-        let matchIndex = 0;
+    // Find the closest matching value in a CDF
+    findClosestCDFMatch(value, cdf) {
+        let best = 0;
+        let minDiff = 1;
         
         for (let i = 0; i < cdf.length; i++) {
             const diff = Math.abs(cdf[i] - value);
             if (diff < minDiff) {
                 minDiff = diff;
-                matchIndex = i;
+                best = i;
             }
         }
         
-        return matchIndex;
+        return best;
     }
     
-    smoothHistograms(histograms) {
-        const kernel = [0.06, 0.1, 0.2, 0.3, 0.2, 0.1, 0.06]; // Gaussian-like kernel
-        const kernelSize = kernel.length;
-        const halfKernel = Math.floor(kernelSize / 2);
+    // Convert RGB to HSL
+    rgb2hsl(r, g, b) {
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
         
-        const smoothedR = new Array(256).fill(0);
-        const smoothedG = new Array(256).fill(0);
-        const smoothedB = new Array(256).fill(0);
-        
-        // Apply kernel convolution to each histogram
-        for (let i = 0; i < 256; i++) {
-            let sumR = 0, sumG = 0, sumB = 0;
-            let weightSum = 0;
-            
-            for (let j = -halfKernel; j <= halfKernel; j++) {
-                const idx = Math.min(255, Math.max(0, i + j));
-                const weight = kernel[j + halfKernel];
-                
-                sumR += histograms.r[idx] * weight;
-                sumG += histograms.g[idx] * weight;
-                sumB += histograms.b[idx] * weight;
-                weightSum += weight;
-            }
-            
-            smoothedR[i] = sumR / weightSum;
-            smoothedG[i] = sumG / weightSum;
-            smoothedB[i] = sumB / weightSum;
-        }
-        
-        return { r: smoothedR, g: smoothedG, b: smoothedB };
-    }
-    
-    smoothValue(value) {
-        // Apply a subtle S-curve to enhance midtones while preserving highlights and shadows
-        return 0.5 - Math.sin(Math.PI * (0.5 - value)) / (2 * Math.PI);
-    }
-    
-    applyLUT(targetCanvas, lut) {
-        const resultCanvas = document.createElement('canvas');
-        resultCanvas.width = targetCanvas.width;
-        resultCanvas.height = targetCanvas.height;
-        const ctx = resultCanvas.getContext('2d');
-        
-        // Use willReadFrequently for the target canvas context
-        const targetCtx = targetCanvas.getContext('2d', { willReadFrequently: true });
-        const imageData = targetCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
-        const data = imageData.data;
-        const lutSize = 33;
-        
-        // Fixed dithering strength (80% = 16 out of 20)
-        const ditheringStrength = 16 / 20 * 0.002; // Scale to appropriate range
-        
-        // Apply a slight warmth adjustment to match DaVinci Resolve's appearance
-        for (let i = 0; i < data.length; i += 4) {
-            // Get pixel values in 0-1 range
-            const r = data[i] / 255;
-            const g = data[i + 1] / 255;
-            const b = data[i + 2] / 255;
-            
-            // Apply dithering to prevent banding
-            const dither = (Math.random() * ditheringStrength - ditheringStrength/2);
-            const r_dither = Math.min(0.999, Math.max(0.001, r + dither));
-            const g_dither = Math.min(0.999, Math.max(0.001, g + dither));
-            const b_dither = Math.min(0.999, Math.max(0.001, b + dither));
-            
-            // Always use tetrahedral interpolation
-            const colorValues = this.tetrahedralInterpolation(lut, r_dither, g_dither, b_dither, lutSize);
-            
-            // Apply slight warmth adjustment to match DaVinci Resolve's rendering
-            const warmthFactor = 1.08; // Slight boost to red/yellow
-            const coolFactor = 0.95;  // Slight reduction in blue/green
-            
-            // Apply to the image with warmth adjustment
-            data[i] = Math.round(Math.min(1, colorValues.r * warmthFactor) * 255);       // Boost red slightly
-            data[i + 1] = Math.round(Math.min(1, colorValues.g * (warmthFactor * 0.98)) * 255);  // Boost green slightly less
-            data[i + 2] = Math.round(colorValues.b * coolFactor * 255);                  // Reduce blue slightly
-        }
-        
-        ctx.putImageData(imageData, 0, 0);
-        
-        // Return the canvas directly
-        return resultCanvas;
-    }
-    
-    // Tetrahedral interpolation method (better color accuracy than trilinear)
-    tetrahedralInterpolation(lut, r, g, b, lutSize) {
-        // Calculate floating point indices
-        const r_f = r * (lutSize - 1);
-        const g_f = g * (lutSize - 1);
-        const b_f = b * (lutSize - 1);
-        
-        // Get the integer indices of the surrounding cube
-        const r0 = Math.floor(r_f);
-        const g0 = Math.floor(g_f);
-        const b0 = Math.floor(b_f);
-        const r1 = Math.min(r0 + 1, lutSize - 1);
-        const g1 = Math.min(g0 + 1, lutSize - 1);
-        const b1 = Math.min(b0 + 1, lutSize - 1);
-        
-        // Get the fractional parts
-        const r_d = r_f - r0;
-        const g_d = g_f - g0;
-        const b_d = b_f - b0;
-        
-        // Get the 8 corner values
-        const c000 = this.getLUTValue(lut, r0, g0, b0, lutSize);
-        const c001 = this.getLUTValue(lut, r0, g0, b1, lutSize);
-        const c010 = this.getLUTValue(lut, r0, g1, b0, lutSize);
-        const c011 = this.getLUTValue(lut, r0, g1, b1, lutSize);
-        const c100 = this.getLUTValue(lut, r1, g0, b0, lutSize);
-        const c101 = this.getLUTValue(lut, r1, g0, b1, lutSize);
-        const c110 = this.getLUTValue(lut, r1, g1, b0, lutSize);
-        const c111 = this.getLUTValue(lut, r1, g1, b1, lutSize);
-        
-        // Determine which tetrahedron we're in
-        let result;
-        if (r_d >= g_d) {
-            if (g_d >= b_d) {
-                // Tetrahedron 1: r >= g >= b
-                result = {
-                    r: c000.r + r_d * (c100.r - c000.r) + g_d * (c110.r - c100.r) + b_d * (c111.r - c110.r),
-                    g: c000.g + r_d * (c100.g - c000.g) + g_d * (c110.g - c100.g) + b_d * (c111.g - c110.g),
-                    b: c000.b + r_d * (c100.b - c000.b) + g_d * (c110.b - c100.b) + b_d * (c111.b - c110.b)
-                };
-            } else if (r_d >= b_d) {
-                // Tetrahedron 2: r >= b >= g
-                result = {
-                    r: c000.r + r_d * (c100.r - c000.r) + b_d * (c101.r - c100.r) + g_d * (c111.r - c101.r),
-                    g: c000.g + r_d * (c100.g - c000.g) + b_d * (c101.g - c100.g) + g_d * (c111.g - c101.g),
-                    b: c000.b + r_d * (c100.b - c000.b) + b_d * (c101.b - c100.b) + g_d * (c111.b - c101.b)
-                };
-            } else {
-                // Tetrahedron 3: b >= r >= g
-                result = {
-                    r: c000.r + b_d * (c001.r - c000.r) + r_d * (c101.r - c001.r) + g_d * (c111.r - c101.r),
-                    g: c000.g + b_d * (c001.g - c000.g) + r_d * (c101.g - c001.g) + g_d * (c111.g - c101.g),
-                    b: c000.b + b_d * (c001.b - c000.b) + r_d * (c101.b - c001.b) + g_d * (c111.b - c101.b)
-                };
-            }
+        if (max === min) {
+            h = s = 0; // achromatic
         } else {
-            if (b_d >= g_d) {
-                // Tetrahedron 4: b >= g >= r
-                result = {
-                    r: c000.r + b_d * (c001.r - c000.r) + g_d * (c011.r - c001.r) + r_d * (c111.r - c011.r),
-                    g: c000.g + b_d * (c001.g - c000.g) + g_d * (c011.g - c001.g) + r_d * (c111.g - c011.g),
-                    b: c000.b + b_d * (c001.b - c000.b) + g_d * (c011.b - c001.b) + r_d * (c111.b - c011.b)
-                };
-            } else if (b_d >= r_d) {
-                // Tetrahedron 5: g >= b >= r
-                result = {
-                    r: c000.r + g_d * (c010.r - c000.r) + b_d * (c011.r - c010.r) + r_d * (c111.r - c011.r),
-                    g: c000.g + g_d * (c010.g - c000.g) + b_d * (c011.g - c010.g) + r_d * (c111.g - c011.g),
-                    b: c000.b + g_d * (c010.b - c000.b) + b_d * (c011.b - c010.b) + r_d * (c111.b - c011.b)
-                };
-            } else {
-                // Tetrahedron 6: g >= r >= b
-                result = {
-                    r: c000.r + g_d * (c010.r - c000.r) + r_d * (c110.r - c010.r) + b_d * (c111.r - c110.r),
-                    g: c000.g + g_d * (c010.g - c000.g) + r_d * (c110.g - c010.g) + b_d * (c111.g - c110.g),
-                    b: c000.b + g_d * (c010.b - c000.b) + r_d * (c110.b - c010.b) + b_d * (c111.b - c110.b)
-                };
+            const d = max - min;
+            s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+            
+            switch (max) {
+                case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                case g: h = (b - r) / d + 2; break;
+                case b: h = (r - g) / d + 4; break;
             }
+            
+            h /= 6;
         }
         
-        return result;
+        return [h, s, l];
     }
     
-    getLUTValue(lut, r, g, b, lutSize) {
-        const idx = (r * lutSize * lutSize + g * lutSize + b) * 3;
-        return {
-            r: lut[idx],
-            g: lut[idx + 1],
-            b: lut[idx + 2]
-        };
+    // Convert HSL to RGB
+    hsl2rgb(h, s, l) {
+        let r, g, b;
+        
+        if (s === 0) {
+            r = g = b = l; // achromatic
+        } else {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+            
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+        
+        return [r, g, b];
+    }
+    
+    // Special tone curve for shadows
+    toneCurveShadows(value) {
+        if (value < 0.01) return value; // Protect pure blacks
+        
+        // Gentler curve for shadows to preserve detail
+        const enhanced = Math.pow(value, 0.95); // Gentler power than standard curve
+        
+        // Less enhancement, more original preservation
+        return 0.6 * enhanced + 0.4 * value;
+    }
+    
+    // Special tone curve for highlights
+    toneCurveHighlights(value) {
+        if (value > 0.99) return value; // Protect pure whites
+        
+        // Very gentle curve for highlights
+        // For values > 0.7, use an even gentler curve
+        const factor = value > 0.7 ? 0.3 : 0.5;
+        const enhanced = value + (Math.sin(Math.PI * (value - 0.5)) * factor * 0.05);
+        
+        // Heavy original preservation for highlights
+        return 0.4 * enhanced + 0.6 * value;
     }
     
     downloadLUT() {
@@ -1599,6 +1538,249 @@ class LUTGenerator {
             img.style.width = 'auto';
         }
         return img;
+    }
+
+    // Helper method to detect if the image has high contrast
+    detectHighContrast(stats) {
+        // Check the standard deviation of luminance
+        const rWeight = 0.2126;
+        const gWeight = 0.7152;
+        const bWeight = 0.0722;
+        
+        const stdDev = rWeight * stats.r.stdDev + gWeight * stats.g.stdDev + bWeight * stats.b.stdDev;
+        
+        // Higher standard deviation indicates higher contrast
+        return stdDev > 0.2; // Threshold determined empirically
+    }
+    
+    // Helper method to detect the dominant color
+    detectDominantColor(imageData) {
+        let rSum = 0, gSum = 0, bSum = 0;
+        let pixelCount = 0;
+        
+        // Sample pixels (for efficiency, don't check every pixel)
+        const sampleRate = Math.max(1, Math.floor(imageData.length / 4 / 1000));
+        
+        for (let i = 0; i < imageData.length; i += sampleRate * 4) {
+            rSum += imageData[i];
+            gSum += imageData[i + 1];
+            bSum += imageData[i + 2];
+            pixelCount++;
+        }
+        
+        // Average RGB values
+        const rAvg = rSum / pixelCount;
+        const gAvg = gSum / pixelCount;
+        const bAvg = bSum / pixelCount;
+        
+        // Find the dominant channel
+        if (rAvg > gAvg && rAvg > bAvg && rAvg > 100) {
+            return 'red';
+        } else if (gAvg > rAvg && gAvg > bAvg && gAvg > 100) {
+            return 'green';
+        } else if (bAvg > rAvg && bAvg > gAvg && bAvg > 100) {
+            return 'blue';
+        } else if (rAvg > 100 && gAvg > 100 && rAvg > bAvg && gAvg > bAvg) {
+            return 'yellow';
+        } else if (rAvg > 100 && bAvg > 100 && rAvg > gAvg && bAvg > gAvg) {
+            return 'magenta';
+        } else if (gAvg > 100 && bAvg > 100 && gAvg > rAvg && bAvg > rAvg) {
+            return 'cyan';
+        }
+        
+        return null; // No strong dominant color
+    }
+    
+    // Enhance contrast based on the input color
+    enhanceContrast(color, intensity) {
+        const [r, g, b] = color;
+        
+        // Apply a subtle S-curve to increase contrast
+        const enhanceFactor = 0.2 * intensity;
+        
+        const enhanceChannel = (value) => {
+            // Center around 0.5
+            const centered = value - 0.5;
+            
+            // Apply less enhancement to highlights
+            let enhancementMultiplier = 1.0;
+            if (value > 0.7) {
+                // Gradually reduce enhancement for highlights
+                enhancementMultiplier = 1.0 - ((value - 0.7) / 0.3) * 0.5;
+            }
+            
+            // Apply cubic function for S-curve with reduced effect on highlights
+            const enhanced = centered * (1 + enhanceFactor * Math.abs(centered) * enhancementMultiplier);
+            
+            // Re-center and clamp
+            return Math.max(0, Math.min(1, enhanced + 0.5));
+        };
+        
+        return [
+            enhanceChannel(r),
+            enhanceChannel(g),
+            enhanceChannel(b)
+        ];
+    }
+    
+    // Boost the dominant color slightly for more cinematic look
+    boostDominantColor(color, dominantColor, intensity) {
+        const [r, g, b] = color;
+        const boost = 0.05 * intensity;
+        
+        switch (dominantColor) {
+            case 'red':
+                return [Math.min(1, r + boost), g, b];
+            case 'green':
+                return [r, Math.min(1, g + boost), b];
+            case 'blue':
+                return [r, g, Math.min(1, b + boost)];
+            case 'yellow':
+                return [Math.min(1, r + boost * 0.7), Math.min(1, g + boost * 0.7), b];
+            case 'magenta':
+                return [Math.min(1, r + boost * 0.7), g, Math.min(1, b + boost * 0.7)];
+            case 'cyan':
+                return [r, Math.min(1, g + boost * 0.7), Math.min(1, b + boost * 0.7)];
+            default:
+                return [r, g, b];
+        }
+    }
+    
+    // Apply the LUT to transform an image
+    applyLUT(targetCanvas, lut) {
+        const resultCanvas = document.createElement('canvas');
+        resultCanvas.width = targetCanvas.width;
+        resultCanvas.height = targetCanvas.height;
+        const ctx = resultCanvas.getContext('2d');
+        
+        // Use willReadFrequently for the target canvas context
+        const targetCtx = targetCanvas.getContext('2d', { willReadFrequently: true });
+        const imageData = targetCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
+        const data = imageData.data;
+        const lutSize = 33;
+        
+        // Fixed dithering strength - subtle effect to prevent banding
+        const ditheringStrength = 0.002;
+        
+        // Apply LUT transformation to each pixel
+        for (let i = 0; i < data.length; i += 4) {
+            // Get pixel values in 0-1 range
+            const r = data[i] / 255;
+            const g = data[i + 1] / 255;
+            const b = data[i + 2] / 255;
+            
+            // Apply dithering to prevent banding
+            const dither = (Math.random() * ditheringStrength - ditheringStrength/2);
+            const r_dither = Math.min(0.999, Math.max(0.001, r + dither));
+            const g_dither = Math.min(0.999, Math.max(0.001, g + dither));
+            const b_dither = Math.min(0.999, Math.max(0.001, b + dither));
+            
+            // Get transformed color using tetrahedral interpolation for better accuracy
+            const colorValues = this.tetrahedralInterpolation(lut, r_dither, g_dither, b_dither, lutSize);
+            
+            // Apply to the image
+            data[i] = Math.round(Math.min(1, colorValues.r) * 255);
+            data[i + 1] = Math.round(Math.min(1, colorValues.g) * 255);
+            data[i + 2] = Math.round(Math.min(1, colorValues.b) * 255);
+        }
+        
+        ctx.putImageData(imageData, 0, 0);
+        
+        // Return the transformed canvas
+        return resultCanvas;
+    }
+    
+    // Tetrahedral interpolation method (better color accuracy than trilinear)
+    tetrahedralInterpolation(lut, r, g, b, lutSize) {
+        // Calculate floating point indices
+        const r_f = r * (lutSize - 1);
+        const g_f = g * (lutSize - 1);
+        const b_f = b * (lutSize - 1);
+        
+        // Get the integer indices of the surrounding cube
+        const r0 = Math.floor(r_f);
+        const g0 = Math.floor(g_f);
+        const b0 = Math.floor(b_f);
+        const r1 = Math.min(r0 + 1, lutSize - 1);
+        const g1 = Math.min(g0 + 1, lutSize - 1);
+        const b1 = Math.min(b0 + 1, lutSize - 1);
+        
+        // Get the fractional parts
+        const r_d = r_f - r0;
+        const g_d = g_f - g0;
+        const b_d = b_f - b0;
+        
+        // Get the 8 corner values
+        const c000 = this.getLUTValue(lut, r0, g0, b0, lutSize);
+        const c001 = this.getLUTValue(lut, r0, g0, b1, lutSize);
+        const c010 = this.getLUTValue(lut, r0, g1, b0, lutSize);
+        const c011 = this.getLUTValue(lut, r0, g1, b1, lutSize);
+        const c100 = this.getLUTValue(lut, r1, g0, b0, lutSize);
+        const c101 = this.getLUTValue(lut, r1, g0, b1, lutSize);
+        const c110 = this.getLUTValue(lut, r1, g1, b0, lutSize);
+        const c111 = this.getLUTValue(lut, r1, g1, b1, lutSize);
+        
+        // Determine which tetrahedron we're in
+        let result;
+        if (r_d >= g_d) {
+            if (g_d >= b_d) {
+                // Tetrahedron 1: r >= g >= b
+                result = {
+                    r: c000.r + r_d * (c100.r - c000.r) + g_d * (c110.r - c100.r) + b_d * (c111.r - c110.r),
+                    g: c000.g + r_d * (c100.g - c000.g) + g_d * (c110.g - c100.g) + b_d * (c111.g - c110.g),
+                    b: c000.b + r_d * (c100.b - c000.b) + g_d * (c110.b - c100.b) + b_d * (c111.b - c110.b)
+                };
+            } else if (r_d >= b_d) {
+                // Tetrahedron 2: r >= b >= g
+                result = {
+                    r: c000.r + r_d * (c100.r - c000.r) + b_d * (c101.r - c100.r) + g_d * (c111.r - c101.r),
+                    g: c000.g + r_d * (c100.g - c000.g) + b_d * (c101.g - c100.g) + g_d * (c111.g - c101.g),
+                    b: c000.b + r_d * (c100.b - c000.b) + b_d * (c101.b - c100.b) + g_d * (c111.b - c101.b)
+                };
+            } else {
+                // Tetrahedron 3: b >= r >= g
+                result = {
+                    r: c000.r + b_d * (c001.r - c000.r) + r_d * (c101.r - c001.r) + g_d * (c111.r - c101.r),
+                    g: c000.g + b_d * (c001.g - c000.g) + r_d * (c101.g - c001.g) + g_d * (c111.g - c101.g),
+                    b: c000.b + b_d * (c001.b - c000.b) + r_d * (c101.b - c001.b) + g_d * (c111.b - c101.b)
+                };
+            }
+        } else {
+            if (b_d >= g_d) {
+                // Tetrahedron 4: b >= g >= r
+                result = {
+                    r: c000.r + b_d * (c001.r - c000.r) + g_d * (c011.r - c001.r) + r_d * (c111.r - c011.r),
+                    g: c000.g + b_d * (c001.g - c000.g) + g_d * (c011.g - c001.g) + r_d * (c111.g - c011.g),
+                    b: c000.b + b_d * (c001.b - c000.b) + g_d * (c011.b - c001.b) + r_d * (c111.b - c011.b)
+                };
+            } else if (b_d >= r_d) {
+                // Tetrahedron 5: g >= b >= r
+                result = {
+                    r: c000.r + g_d * (c010.r - c000.r) + b_d * (c011.r - c010.r) + r_d * (c111.r - c011.r),
+                    g: c000.g + g_d * (c010.g - c000.g) + b_d * (c011.g - c010.g) + r_d * (c111.g - c011.g),
+                    b: c000.b + g_d * (c010.b - c000.b) + b_d * (c011.b - c010.b) + r_d * (c111.b - c011.b)
+                };
+            } else {
+                // Tetrahedron 6: g >= r >= b
+                result = {
+                    r: c000.r + g_d * (c010.r - c000.r) + r_d * (c110.r - c010.r) + b_d * (c111.r - c110.r),
+                    g: c000.g + g_d * (c010.g - c000.g) + r_d * (c110.g - c010.g) + b_d * (c111.g - c110.g),
+                    b: c000.b + g_d * (c010.b - c000.b) + r_d * (c110.b - c010.b) + b_d * (c111.b - c110.b)
+                };
+            }
+        }
+        
+        return result;
+    }
+    
+    // Helper method to get a value from the LUT
+    getLUTValue(lut, r, g, b, lutSize) {
+        const idx = (r * lutSize * lutSize + g * lutSize + b) * 3;
+        return {
+            r: lut[idx],
+            g: lut[idx + 1],
+            b: lut[idx + 2]
+        };
     }
 }
 
