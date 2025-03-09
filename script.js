@@ -598,9 +598,10 @@ class LUTGenerator {
                     let g_matched = this.histogramMatch(g_norm, targetStats.g, refStats.g);
                     let b_matched = this.histogramMatch(b_norm, targetStats.b, refStats.b);
                     
-                    // Check if both images are black and white
-                    if (this.checkIfImageIsBW(refData.data) && this.checkIfImageIsBW(targetData.data)) {
-                        // For B&W images, use luminance-based matching
+                    // Check if the reference image is black and white
+                    if (this.checkIfImageIsBW(refData.data)) {
+                        // If reference is B&W, result should also be B&W
+                        // Use luminance-based matching to convert to grayscale
                         const luminance = 0.2126 * r_matched + 0.7152 * g_matched + 0.0722 * b_matched;
                         r_matched = g_matched = b_matched = luminance;
                     }
