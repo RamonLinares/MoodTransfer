@@ -8,3 +8,12 @@ logs
 # Windows files
 Thumbs.db
 Desktop.ini
+
+# Backup and working files
+*.bak
+*.backup
+*.tmp
+*.temp
+script_clean.js
+test.html
+script_new.js

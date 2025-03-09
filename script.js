@@ -19,11 +19,6 @@ class LUTGenerator {
         
         // Add enhanced class to result container
         document.getElementById('resultContainer').classList.add('enhanced-result-container');
-        
-        // Call mobile UI update after DOM is ready
-        setTimeout(() => {
-            this.updateMobileUI();
-        }, 100);
     }
     
     initElements() {
@@ -66,9 +61,6 @@ class LUTGenerator {
             const antiBandingControls = this.createAntiBandingControls();
             optionsContainer.appendChild(antiBandingControls);
         }
-
-        // Initialize mobile UI
-        this.initMobileQualityUI();
     }
     
     initDarkMode() {
@@ -1431,48 +1423,6 @@ class LUTGenerator {
         return container;
     }
     
-    // Update mobile UI
-    updateMobileUI() {
-        // Update mobile generate button state
-        if (this.referenceImage && this.targetImage) {
-            if (this.mobileGenerateBtn) {
-                this.mobileGenerateBtn.classList.remove('disabled');
-            }
-        } else {
-            if (this.mobileGenerateBtn) {
-                this.mobileGenerateBtn.classList.add('disabled');
-            }
-        }
-        
-        // Update mobile download button state
-        if (this.lut) {
-            if (this.mobileDownloadBtn) {
-                this.mobileDownloadBtn.style.display = 'flex';
-            }
-        } else {
-            if (this.mobileDownloadBtn) {
-                this.mobileDownloadBtn.style.display = 'none';
-            }
-        }
-    }
-
-    // Initialize hidden quality inputs
-    initMobileQualityUI() {
-        // Create hidden inputs for quality settings
-        const hiddenInputs = document.createElement('div');
-        hiddenInputs.style.display = 'none';
-        hiddenInputs.innerHTML = `
-            <input type="checkbox" id="mobileEnableDithering" checked>
-            <input type="range" min="0" max="20" value="16" id="mobileDitheringAmount">
-            <select id="mobileInterpolationMethod">
-                <option value="tetrahedral" selected>Tetrahedral</option>
-            </select>
-        `;
-        
-        // Add the hidden inputs to the body
-        document.body.appendChild(hiddenInputs);
-    }
-
     // Add a method to reset the upload containers
     resetUploadContainer(type) {
         if (type === 'reference') {
@@ -1789,22 +1739,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize the LUT generator
     const lutGenerator = new LUTGenerator();
     
-    // The mobile UI setup is now handled within the LUTGenerator class
     // No need to call updateMobileUI here
 });
 
-// Also add some CSS for the quality panel
+// Add CSS for select input style
 const style = document.createElement('style');
 style.textContent = `
-    .mobile-quality-panel {
-        z-index: 1001;
-    }
-    
-    .mobile-quality-panel.show {
-        transform: translateY(0);
-        opacity: 1;
-    }
-
     .select-input {
         padding: 8px;
         border-radius: 4px;
@@ -1817,10 +1757,3 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// Also search for and remove any standalone updateMobileUI function or calls
-// If there's a standalone updateMobileUI function, replace it with an empty function
-// that does nothing to prevent errors
-function updateMobileUI() {
-    console.log('Deprecated updateMobileUI called - this function is now replaced by LUTGenerator.setupMobileQualityUI()');
-    // Do nothing - functionality is now in LUTGenerator.setupMobileQualityUI()
-} 
