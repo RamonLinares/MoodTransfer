@@ -566,74 +566,225 @@ class LUTGenerator {
     }
     
     async calculateLUT(referenceCanvas, targetCanvas) {
-        // Get image data from canvases
-        const refCtx = referenceCanvas.getContext('2d', { willReadFrequently: true });
-        const targetCtx = targetCanvas.getContext('2d', { willReadFrequently: true });
-        
-        const refData = refCtx.getImageData(0, 0, referenceCanvas.width, referenceCanvas.height);
-        const targetData = targetCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
-        
-        // Calculate image statistics for both images
-        const refStats = this.calculateImageStats(refData.data);
-        const targetStats = this.calculateImageStats(targetData.data);
-        
-        // Create LUT
-        const lutSize = 33;
-        const lut = new Float32Array(lutSize * lutSize * lutSize * 3);
-        
-        // Get the intensity adjustment value (0-100)
-        const intensity = this.colorIntensity.value / 100;
-        
-        // Fill LUT with improved color transformation
-        let i = 0;
-        for (let r = 0; r < lutSize; r++) {
-            for (let g = 0; g < lutSize; g++) {
-                for (let b = 0; b < lutSize; b++) {
-                    const r_norm = r / (lutSize - 1);
-                    const g_norm = g / (lutSize - 1);
-                    const b_norm = b / (lutSize - 1);
-                    
-                    // Apply histogram matching for each channel
-                    let r_matched = this.histogramMatch(r_norm, targetStats.r, refStats.r);
-                    let g_matched = this.histogramMatch(g_norm, targetStats.g, refStats.g);
-                    let b_matched = this.histogramMatch(b_norm, targetStats.b, refStats.b);
-                    
-                    // Check if the reference image is black and white
-                    if (this.checkIfImageIsBW(refData.data)) {
-                        // If reference is B&W, result should also be B&W
-                        // Use luminance-based matching to convert to grayscale
-                        const luminance = 0.2126 * r_matched + 0.7152 * g_matched + 0.0722 * b_matched;
-                        r_matched = g_matched = b_matched = luminance;
+        try {
+            // Get image data
+            const refCtx = referenceCanvas.getContext('2d');
+            const targetCtx = targetCanvas.getContext('2d');
+            
+            // Set willReadFrequently option for better performance
+            const refData = refCtx.getImageData(0, 0, referenceCanvas.width, referenceCanvas.height);
+            const targetData = targetCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
+            
+            // Calculate image statistics
+            const refStats = this.calculateImageStats(refData.data);
+            const targetStats = this.calculateImageStats(targetData.data);
+            
+            // Create LUT
+            const lutSize = 33; // Standard size for most applications
+            const lut = new Float32Array(lutSize * lutSize * lutSize * 3); // RGB values
+            
+            // Get the intensity adjustment value (0-100)
+            const intensity = this.colorIntensity.value / 100;
+            
+            // Detect image characteristics for enhanced processing
+            const isReferenceMonochrome = this.checkIfImageIsBW(refData.data);
+            const isHighContrast = this.detectHighContrast(refStats);
+            const dominantColor = this.detectDominantColor(refData.data);
+            
+            // Fill LUT with improved color transformation
+            for (let r = 0; r < lutSize; r++) {
+                for (let g = 0; g < lutSize; g++) {
+                    for (let b = 0; b < lutSize; b++) {
+                        const r_norm = r / (lutSize - 1);
+                        const g_norm = g / (lutSize - 1);
+                        const b_norm = b / (lutSize - 1);
+                        
+                        // Apply histogram matching for each channel
+                        let r_matched = this.histogramMatch(r_norm, targetStats.r, refStats.r);
+                        let g_matched = this.histogramMatch(g_norm, targetStats.g, refStats.g);
+                        let b_matched = this.histogramMatch(b_norm, targetStats.b, refStats.b);
+                        
+                        // Check if the reference image is black and white
+                        if (isReferenceMonochrome) {
+                            // If reference is B&W, result should also be B&W
+                            // Use luminance-based matching to convert to grayscale
+                            const luminance = 0.2126 * r_matched + 0.7152 * g_matched + 0.0722 * b_matched;
+                            r_matched = g_matched = b_matched = luminance;
+                        } else {
+                            // Enhanced color processing for color images
+                            
+                            // Apply split toning - different color tints for shadows and highlights
+                            const luminance = 0.2126 * r_norm + 0.7152 * g_norm + 0.0722 * b_norm;
+                            
+                            // Split toning (shadows get slightly warmer, highlights slightly cooler)
+                            if (luminance < 0.5) {
+                                // Warm up shadows (more red, less blue)
+                                const shadowIntensity = (0.5 - luminance) * 2 * intensity * 0.2;
+                                r_matched += shadowIntensity * 0.1;
+                                b_matched -= shadowIntensity * 0.05;
+                            } else {
+                                // Cool highlights (more blue, less yellow) - gentler application
+                                // Apply less effect as we approach extreme highlights
+                                const highlightFactor = Math.min(1, 2.5 - 2 * luminance); // Reduces effect for values > 0.75
+                                const highlightIntensity = (luminance - 0.5) * 2 * intensity * 0.1 * highlightFactor;
+                                b_matched += highlightIntensity * 0.05; // Reduced from 0.08
+                                g_matched -= highlightIntensity * 0.02; // Reduced from 0.03
+                            }
+                            
+                            // Enhance contrast based on reference image characteristics
+                            if (isHighContrast) {
+                                // Apply more pronounced contrast enhancement
+                                [r_matched, g_matched, b_matched] = this.enhanceContrast([r_matched, g_matched, b_matched], intensity);
+                            }
+                            
+                            // Boost dominant color slightly for more cinematic look
+                            if (dominantColor) {
+                                [r_matched, g_matched, b_matched] = this.boostDominantColor([r_matched, g_matched, b_matched], dominantColor, intensity);
+                            }
+                        }
+                        
+                        // Apply intensity adjustment
+                        // Base intensity effect - how much of the original color to keep
+                        let intensityFactor = intensity;
+                        
+                        // Add a very subtle dithering effect to prevent banding
+                        intensityFactor += (Math.random() * 0.01 - 0.005);
+                        
+                        // Get original RGB
+                        const originalR = r_norm;
+                        const originalG = g_norm;
+                        const originalB = b_norm;
+                        
+                        // Apply smooth interpolation between original and transformed colors
+                        const newR = this.smoothLerp(originalR, r_matched, intensityFactor);
+                        const newG = this.smoothLerp(originalG, g_matched, intensityFactor);
+                        const newB = this.smoothLerp(originalB, b_matched, intensityFactor);
+                        
+                        // Apply tone curve for better contrast and prevent washed out appearance
+                        const finalR = this.toneCurve(newR);
+                        const finalG = this.toneCurve(newG);
+                        const finalB = this.toneCurve(newB);
+                        
+                        // Store in LUT
+                        const idx = (r * lutSize * lutSize + g * lutSize + b) * 3;
+                        lut[idx] = finalR;
+                        lut[idx + 1] = finalG;
+                        lut[idx + 2] = finalB;
                     }
-                    
-                    // Apply intensity adjustment
-                    // Base intensity effect - how much of the original color to keep
-                    let intensityFactor = intensity;
-                    
-                    // Add subtle dithering to prevent banding
-                    const noise = (Math.random() - 0.5) * 0.02;
-                    intensityFactor = Math.min(1, Math.max(0, intensityFactor + noise));
-                    
-                    // Smooth interpolation between original and transformed colors
-                    r_matched = this.smoothLerp(r_matched, r_norm, intensityFactor);
-                    g_matched = this.smoothLerp(g_matched, g_norm, intensityFactor);
-                    b_matched = this.smoothLerp(b_matched, b_norm, intensityFactor);
-                    
-                    // Apply tone curve enhancement
-                    r_matched = this.toneCurve(r_matched);
-                    g_matched = this.toneCurve(g_matched);
-                    b_matched = this.toneCurve(b_matched);
-                    
-                    // Store in LUT
-                    lut[i] = r_matched;
-                    lut[i + 1] = g_matched;
-                    lut[i + 2] = b_matched;
-                    i += 3;
                 }
             }
+            
+            return lut;
+        } catch (error) {
+            console.error('Error calculating LUT:', error);
+            throw error;
+        }
+    }
+    
+    // Helper method to detect if the image has high contrast
+    detectHighContrast(stats) {
+        // Check the standard deviation of luminance
+        const rWeight = 0.2126;
+        const gWeight = 0.7152;
+        const bWeight = 0.0722;
+        
+        const stdDev = rWeight * stats.r.stdDev + gWeight * stats.g.stdDev + bWeight * stats.b.stdDev;
+        
+        // Higher standard deviation indicates higher contrast
+        return stdDev > 0.2; // Threshold determined empirically
+    }
+    
+    // Helper method to detect the dominant color
+    detectDominantColor(imageData) {
+        let rSum = 0, gSum = 0, bSum = 0;
+        let pixelCount = 0;
+        
+        // Sample pixels (for efficiency, don't check every pixel)
+        const sampleRate = Math.max(1, Math.floor(imageData.length / 4 / 1000));
+        
+        for (let i = 0; i < imageData.length; i += sampleRate * 4) {
+            rSum += imageData[i];
+            gSum += imageData[i + 1];
+            bSum += imageData[i + 2];
+            pixelCount++;
         }
         
-        return lut;
+        // Average RGB values
+        const rAvg = rSum / pixelCount;
+        const gAvg = gSum / pixelCount;
+        const bAvg = bSum / pixelCount;
+        
+        // Find the dominant channel
+        if (rAvg > gAvg && rAvg > bAvg && rAvg > 100) {
+            return 'red';
+        } else if (gAvg > rAvg && gAvg > bAvg && gAvg > 100) {
+            return 'green';
+        } else if (bAvg > rAvg && bAvg > gAvg && bAvg > 100) {
+            return 'blue';
+        } else if (rAvg > 100 && gAvg > 100 && rAvg > bAvg && gAvg > bAvg) {
+            return 'yellow';
+        } else if (rAvg > 100 && bAvg > 100 && rAvg > gAvg && bAvg > gAvg) {
+            return 'magenta';
+        } else if (gAvg > 100 && bAvg > 100 && gAvg > rAvg && bAvg > rAvg) {
+            return 'cyan';
+        }
+        
+        return null; // No strong dominant color
+    }
+    
+    // Enhance contrast based on the input color
+    enhanceContrast(color, intensity) {
+        const [r, g, b] = color;
+        
+        // Apply a subtle S-curve to increase contrast
+        const enhanceFactor = 0.2 * intensity;
+        
+        const enhanceChannel = (value) => {
+            // Center around 0.5
+            const centered = value - 0.5;
+            
+            // Apply less enhancement to highlights
+            let enhancementMultiplier = 1.0;
+            if (value > 0.7) {
+                // Gradually reduce enhancement for highlights
+                enhancementMultiplier = 1.0 - ((value - 0.7) / 0.3) * 0.5;
+            }
+            
+            // Apply cubic function for S-curve with reduced effect on highlights
+            const enhanced = centered * (1 + enhanceFactor * Math.abs(centered) * enhancementMultiplier);
+            
+            // Re-center and clamp
+            return Math.max(0, Math.min(1, enhanced + 0.5));
+        };
+        
+        return [
+            enhanceChannel(r),
+            enhanceChannel(g),
+            enhanceChannel(b)
+        ];
+    }
+    
+    // Boost the dominant color slightly for more cinematic look
+    boostDominantColor(color, dominantColor, intensity) {
+        const [r, g, b] = color;
+        const boost = 0.05 * intensity;
+        
+        switch (dominantColor) {
+            case 'red':
+                return [Math.min(1, r + boost), g, b];
+            case 'green':
+                return [r, Math.min(1, g + boost), b];
+            case 'blue':
+                return [r, g, Math.min(1, b + boost)];
+            case 'yellow':
+                return [Math.min(1, r + boost * 0.7), Math.min(1, g + boost * 0.7), b];
+            case 'magenta':
+                return [Math.min(1, r + boost * 0.7), g, Math.min(1, b + boost * 0.7)];
+            case 'cyan':
+                return [r, Math.min(1, g + boost * 0.7), Math.min(1, b + boost * 0.7)];
+            default:
+                return [r, g, b];
+        }
     }
     
     calculateHistograms(imageData) {
@@ -1082,20 +1233,25 @@ class LUTGenerator {
         // S-curve for enhanced contrast while preserving highlights and shadows
         const x = value;
         
-        // Enhanced contrast in midtones while preserving shadows and highlights
+        // Enhanced contrast in midtones while protecting highlights better
+        // Reduced power for highlights (1.1 instead of 1.2)
         const enhanced = (x < 0.5) 
             ? 0.5 * Math.pow(2 * x, 1.2) 
-            : 1 - 0.5 * Math.pow(2 * (1 - x), 1.2);
+            : 1 - 0.5 * Math.pow(2 * (1 - x), 1.05);
         
-        // Blend original with enhanced (80% enhanced, 20% original)
-        return 0.8 * enhanced + 0.2 * x;
+        // Blend original with enhanced (70% enhanced, 30% original for better highlight protection)
+        return (x > 0.75) 
+            ? 0.5 * enhanced + 0.5 * x  // More original preservation for extreme highlights
+            : 0.7 * enhanced + 0.3 * x; // Standard blend for midtones and shadows
     }
     
     // Add this smooth lerp function for better transitions
     smoothLerp(a, b, t) {
         // Apply a smoothstep function to t for smoother interpolation
         const smoothT = t * t * (3 - 2 * t);
-        return a * smoothT + b * (1 - smoothT);
+        // Corrected interpolation: a is original color, b is transformed color
+        // t is intensity: 0 = keep original, 1 = fully transformed
+        return a * (1 - smoothT) + b * smoothT;
     }
     
     // Add a new method to reset the result state
